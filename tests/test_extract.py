@@ -96,6 +96,39 @@ def test_collect_files_handles_circular_symlinks(tmp_path):
     assert any(f.name == "mod.py" for f in files)
 
 
+def test_collect_files_respects_graphifyignore(tmp_path):
+    (tmp_path / ".graphifyignore").write_text("vendor/\n*.generated.py\n")
+    vendor = tmp_path / "vendor"
+    vendor.mkdir()
+    (vendor / "lib.py").write_text("x = 1")
+    (tmp_path / "main.py").write_text("x = 1")
+    (tmp_path / "schema.generated.py").write_text("x = 1")
+
+    files = collect_files(tmp_path)
+    names = {f.name for f in files}
+
+    assert "main.py" in names
+    assert "lib.py" not in names
+    assert "schema.generated.py" not in names
+
+
+def test_collect_files_skips_noise_dirs(tmp_path):
+    node_modules = tmp_path / "node_modules"
+    node_modules.mkdir()
+    (node_modules / "dep.js").write_text("export const x = 1")
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "bundle.js").write_text("export const y = 1")
+    (tmp_path / "app.js").write_text("export const z = 1")
+
+    files = collect_files(tmp_path)
+    names = {f.name for f in files}
+
+    assert "app.js" in names
+    assert "dep.js" not in names
+    assert "bundle.js" not in names
+
+
 def test_no_dangling_edges_on_extract():
     """After merging multiple files, no internal edges should be dangling."""
     files = list(FIXTURES.glob("*.py"))

@@ -299,6 +299,44 @@ def _is_ignored(path: Path, root: Path, patterns: list[str]) -> bool:
     return False
 
 
+def collect_code_files(root: Path, *, follow_symlinks: bool = False) -> list[Path]:
+    """Collect code files while honoring the same ignore rules as detect()."""
+    if root.is_file():
+        return [root] if classify_file(root) == FileType.CODE else []
+
+    ignore_patterns = _load_graphifyignore(root)
+    results: list[Path] = []
+
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=follow_symlinks):
+        if follow_symlinks and os.path.islink(dirpath):
+            real = os.path.realpath(dirpath)
+            parent_real = os.path.realpath(os.path.dirname(dirpath))
+            if parent_real == real or parent_real.startswith(real + os.sep):
+                dirnames.clear()
+                continue
+
+        dp = Path(dirpath)
+        # Keep code-only rebuilds aligned with detect(): same hidden/noise/ignore policy.
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith(".")
+            and not _is_noise_dir(d)
+            and not _is_ignored(dp / d, root, ignore_patterns)
+        ]
+
+        for fname in filenames:
+            path = dp / fname
+            if fname.startswith("."):
+                continue
+            if classify_file(path) != FileType.CODE:
+                continue
+            if _is_ignored(path, root, ignore_patterns):
+                continue
+            results.append(path)
+
+    return sorted(results)
+
+
 def detect(root: Path, *, follow_symlinks: bool = False) -> dict:
     files: dict[FileType, list[str]] = {
         FileType.CODE: [],

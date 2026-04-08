@@ -1,9 +1,8 @@
 """Tests for watch.py - file watcher helpers (no watchdog required)."""
-import time
 from pathlib import Path
 import pytest
 
-from graphify.watch import _notify_only, _WATCHED_EXTENSIONS
+from graphify.watch import _notify_only, _WATCHED_EXTENSIONS, _rebuild_code
 
 
 # --- _notify_only ---
@@ -66,3 +65,18 @@ def test_watch_raises_without_watchdog(tmp_path, monkeypatch):
     from graphify.watch import watch
     with pytest.raises(ImportError, match="watchdog not installed"):
         watch(tmp_path)
+
+
+def test_rebuild_code_respects_graphifyignore(tmp_path):
+    (tmp_path / ".graphifyignore").write_text("vendor/\n")
+    vendor = tmp_path / "vendor"
+    vendor.mkdir()
+    (vendor / "lib.py").write_text("class VendorOnly:\n    pass\n")
+    (tmp_path / "main.py").write_text("class MainOnly:\n    pass\n")
+
+    ok = _rebuild_code(tmp_path)
+
+    assert ok is True
+    report = (tmp_path / "graphify-out" / "GRAPH_REPORT.md").read_text()
+    assert "MainOnly" in report
+    assert "VendorOnly" not in report

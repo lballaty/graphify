@@ -35,6 +35,7 @@ dist/
 ```
 
 Same syntax as `.gitignore`. Patterns match against file paths relative to the folder you run graphify on.
+These exclusions apply to rebuild paths too, including code-only refreshes such as `--watch`.
 
 ## How it works
 
