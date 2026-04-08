@@ -6,7 +6,7 @@ trigger: /graphify
 
 # /graphify
 
-Turn any folder of files into a navigable knowledge graph with community detection, an honest audit trail, and three outputs: interactive HTML, GraphRAG-ready JSON, and a plain-language GRAPH_REPORT.md.
+Turn any folder of files into a navigable knowledge graph with community detection, an honest audit trail, and graph outputs rooted in `graphify-out/`, including `graph.json`, `GRAPH_REPORT.md`, and `index.json`.
 
 ## Usage
 
@@ -41,7 +41,7 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 graphify is built around Andrej Karpathy's /raw folder workflow: drop anything into a folder - papers, tweets, screenshots, code, notes - and get a structured knowledge graph that shows you what you didn't know was connected.
 
 Three things it does that Claude alone cannot:
-1. **Persistent graph** - relationships are stored in `graphify-out/graph.json` and survive across sessions. Ask questions weeks later without re-reading everything.
+1. **Persistent graph** - relationships are stored in `graphify-out/graph.json` and indexed via `graphify-out/index.json`, so assistants can find the default graph output across sessions without hard-coding absolute paths.
 2. **Honest audit trail** - every edge is tagged EXTRACTED, INFERRED, or AMBIGUOUS. You know what was found vs invented.
 3. **Cross-document surprise** - community detection finds connections between concepts in different files that you would never think to ask about directly.
 
@@ -1176,12 +1176,16 @@ Start a background watcher that monitors a folder and auto-updates the graph whe
 
 ```bash
 python3 -m graphify.watch INPUT_PATH --debounce 3
+# optional named output:
+python3 -m graphify.watch INPUT_PATH --debounce 3 --profile core
 ```
 
 Replace INPUT_PATH with the folder to watch. Behavior depends on what changed:
 
 - **Code files only (.py, .ts, .go, etc.):** re-runs AST extraction + rebuild + cluster immediately, no LLM needed. `graph.json` and `GRAPH_REPORT.md` are updated automatically.
 - **Docs, papers, or images:** writes a `graphify-out/needs_update` flag and prints a notification to run `/graphify --update` (LLM semantic re-extraction required).
+
+Named profiles require `INPUT_PATH/.graphifyprofiles.json` with `includes` / `excludes` rules per profile. Those filters are applied before extraction.
 
 Debounce (default 3s): waits until file activity stops before triggering, so a wave of parallel agent writes doesn't trigger a rebuild per file.
 

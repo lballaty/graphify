@@ -112,6 +112,25 @@ def test_collect_files_respects_graphifyignore(tmp_path):
     assert "schema.generated.py" not in names
 
 
+def test_collect_files_respects_include_and_exclude_patterns(tmp_path):
+    (tmp_path / "platform").mkdir()
+    (tmp_path / "training").mkdir()
+    (tmp_path / "platform" / "core.py").write_text("x = 1")
+    (tmp_path / "training" / "task.py").write_text("x = 1")
+    (tmp_path / "training" / "skip.py").write_text("x = 1")
+
+    files = collect_files(
+        tmp_path,
+        include_patterns=["platform/**", "training/**"],
+        exclude_patterns=["training/skip.py"],
+    )
+    rels = {str(f.relative_to(tmp_path)) for f in files}
+
+    assert "platform/core.py" in rels
+    assert "training/task.py" in rels
+    assert "training/skip.py" not in rels
+
+
 def test_collect_files_skips_noise_dirs(tmp_path):
     node_modules = tmp_path / "node_modules"
     node_modules.mkdir()

@@ -101,6 +101,29 @@ def test_run_benchmark_includes_node_edge_counts(tmp_path):
     assert result["edges"] == G.number_of_edges()
 
 
+def test_run_benchmark_uses_index_default_when_no_graph_path(tmp_path, monkeypatch):
+    G = _make_graph()
+    output_dir = tmp_path / "graphify-out" / "default"
+    output_dir.mkdir(parents=True)
+    graph_file = output_dir / "graph.json"
+    _write_graph(G, graph_file)
+    (tmp_path / "graphify-out").mkdir(exist_ok=True)
+    (tmp_path / "graphify-out" / "index.json").write_text(json.dumps({
+        "version": 1,
+        "graphs": {
+            "default": {
+                "name": "default",
+                "graph_path": "graphify-out/default/graph.json",
+            }
+        },
+    }))
+    monkeypatch.chdir(tmp_path)
+
+    result = run_benchmark(corpus_words=5_000)
+    assert result["nodes"] == G.number_of_nodes()
+    assert result["edges"] == G.number_of_edges()
+
+
 # --- print_benchmark ---
 
 def test_print_benchmark_no_crash(tmp_path, capsys):

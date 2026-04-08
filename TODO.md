@@ -1,0 +1,99 @@
+# Graphify Multi-Output TODO
+
+## Done
+
+- Added graph index helpers in `graphify/index.py`
+- Registered default output in `graphify-out/index.json` during `_rebuild_code(...)`
+- Made runtime defaults (`query`, `serve`, `benchmark`) resolve the default graph via the index
+- Documented `index.json` in README and skill docs
+- Added named output support to `_rebuild_code(..., profile=...)`
+- Added profile name validation for safe output directory names
+- Exposed profile selection through the real user-facing watch entry point:
+  `python -m graphify.watch PATH --profile core`
+- Added `.graphifyprofiles.json` support for meaningful include/exclude-based profile definitions
+- Verified `core`, `training`, and `full-first-party` are valid profile names for `llm-test-suite`
+- Verified on `llm-test-suite` that `core` and `training` now produce genuinely different graphs
+- Confirmed index entries stay independent when rerunning one named profile
+- Added profile-local `graph.html` generation during code-only rebuilds
+- Added optional profile-local `graph.graphml` export during code-only rebuilds
+- Exposed profile rebuilds through `graphify rebuild-code PATH --profile NAME`
+- Extended index entries to track optional `graph.html` / `graph.graphml` outputs
+- Added coverage for profile rebuilds, CLI parsing, and index metadata
+
+## Next
+
+- Capture current `xLLMArionComply` verification state so the final multimodal pass can resume cleanly
+  - finalized usable profiles:
+    - `platform-backend`
+    - `platform-ui`
+    - `platform-testing`
+    - `docs-reader`
+    - `platform-docs`
+    - `planning-and-status`
+    - `content-and-training`
+    - `full-first-party`
+  - `full-first-party` finalization details
+    - saved config in `xLLMArionComply/.graphifyprofiles.json` was trimmed to exclude deep duplicate corpora already covered by dedicated profiles:
+      - `arioncomply-v1/docs/**`
+      - `arioncomply-v1/content/**`
+      - `training-content/**`
+    - latest `prepare-profile --profile full-first-party --deep-mode` reduced semantic work from `409` chunks to `123`
+    - prepared state lives in `xLLMArionComply/graphify-out/full-first-party/.graphify-state`
+    - completed semantic batch files in `/tmp`:
+      - `full-first-party-semantic-batch-01.json`
+      - `full-first-party-semantic-batch-02.json`
+      - `full-first-party-semantic-batch-03.json`
+      - `full-first-party-semantic-batch-04.json`
+      - `full-first-party-semantic-batch-05.json`
+      - `full-first-party-semantic-batch-06.json`
+    - merged semantic input: `/tmp/full-first-party-semantic-all.json`
+    - finalized successfully to `xLLMArionComply/graphify-out/full-first-party`
+    - current finalized size: `13230` nodes, `25988` edges, `1340` communities
+  - `graphify-out/index.json` in `xLLMArionComply` has now been rechecked after finalization and points `full-first-party` at the current multimodal output
+
+- Clarify and preserve the intended multi-profile workflow
+  - graphify must work against any target repo or directory by being given only the target root path
+  - step 1 is target-repo analysis to determine whether multiple architectural graph views are needed
+  - step 2 is collaboration with the user to confirm which profiles should exist and what each is for
+  - for complex repos, that collaboration step should explicitly allow assistant-guided review of the repo structure rather than relying only on shallow heuristics
+  - the user should be able to decide that specific paths or directories must become separate profiles, must be merged into one profile, or must be excluded
+  - that collaboration step must allow the proposed profile names to be adjusted before the generated profile config is written and before outputs are built
+  - only after that should graphify generate or refresh the actual graph outputs under the target repo's `graphify-out/`
+  - the generated outputs must be usable later by agents via `graphify-out/index.json`
+- Enforce the intended boundary: no repo-specific integration should be required up front
+  - no repo-local wrappers should be required
+  - profile discovery, proposal, and generation logic must live inside graphify itself
+  - target repos should start as inputs via root path, not pre-integrated extension surfaces
+  - a repo-local profile config such as `.graphifyprofiles.json` is acceptable only as a generated, user-confirmed artifact of graphify's own workflow
+- Verify current implementation against that intended workflow
+  - what is already generic and reusable
+  - what still assumes pre-existing repo-local profile config
+  - what repo-specific work needs to be reverted because it violates the intended boundary
+  - what still needs a first-class repo-analysis/profile-discovery flow inside graphify
+  - what discovery improvements are needed for large monorepos where one dominant subtree hides important internal boundaries such as AI backends, edge functions, database/schema areas, UI frontends, Flutter/demo apps, and testing surfaces
+  - how confirmed profiles should be persisted back into the target repo for repeatable future rebuilds
+  - how named profiles should eventually support docs, papers, images, and mixed multimodal corpora by reusing Graphify's original full extraction logic rather than inventing a separate synthetic profile-specific graph model
+  - continue pulling the original skill workflow into reusable Python helpers so future multimodal named-profile support can call the same code path instead of duplicating shell snippets
+  - reuse shared helpers for profile-scoped detection filtering, semantic cache split/chunk preparation, semantic merge, and the existing shared build/output stages
+  - the main remaining multimodal gap is semantic subagent dispatch and result collection for profile-scoped runs; the surrounding Python pipeline stages should stay shared
+- Handle repos that already have graphify state
+  - if the target repo already has `.graphifyprofiles.json`, graphify should detect it and offer to reuse it rather than immediately rediscovering profiles
+  - if the target repo already has `graphify-out/index.json` and existing outputs, graphify should detect them and offer to refresh those graph targets
+  - the explicit rediscovery path should remain possible by removing `.graphifyprofiles.json` and prior `graphify-out/` outputs before running discovery again
+  - default behavior should favor reusing existing saved profiles and refreshing existing outputs over silently replacing them with a new proposal
+- Update user-facing docs and assistant instructions to reflect the intended workflow
+  - direct CLI usage against arbitrary target paths
+  - Claude Code usage
+  - Codex usage
+- Keep repo-local usage instructions current
+  - target repos should receive a generated `graphify-out/README.md`
+  - it should explain how to use `index.json`, `GRAPH_REPORT.md`, and `graph.json`
+  - it should also explain how to refresh outputs with `rebuild-code`, `build-profiles`, `prepare-profile`, and `finalize-profile`
+- Keep local worktree cleanup separate from committed feature work
+  - local runtime directories like `.venv312/` should not be committed
+  - local scratch artifacts like `xllmarioncomply.graphifyprofiles.draft.json` should not be committed
+  - consider adding ignore coverage for these kinds of local-only artifacts if they are likely to recur
+- Revert repo-specific integration assumptions that are not part of the core graphify design
+
+- Optional future work: surface named profiles in the higher-level skill command itself, not just `graphify.watch` and `graphify rebuild-code`
+- Optional future work: add profile-aware wiki/serve flows if multi-output repos need deeper assistant routing

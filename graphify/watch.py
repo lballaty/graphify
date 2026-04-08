@@ -18,20 +18,45 @@ _CODE_EXTENSIONS = {
 }
 
 
-def _rebuild_code(watch_path: Path, *, follow_symlinks: bool = False) -> bool:
+def _rebuild_code(
+    watch_path: Path,
+    *,
+    follow_symlinks: bool = False,
+    profile: str | None = None,
+    write_html: bool = True,
+    write_graphml: bool = False,
+) -> bool:
     """Re-run AST extraction + build + cluster + report for code files. No LLM needed.
 
     Returns True on success, False on error.
     """
     try:
         from graphify.extract import collect_files, extract
-        from graphify.build import build_from_json
-        from graphify.cluster import cluster, score_all
-        from graphify.analyze import god_nodes, surprising_connections, suggest_questions
-        from graphify.report import generate
-        from graphify.export import to_json
+        from graphify.index import register_graph_output, validate_graph_output_name
+        from graphify.pipeline import build_graph_outputs
+        from graphify.profiles import resolve_graph_profile
 
-        code_files = collect_files(watch_path, follow_symlinks=follow_symlinks)
+        include_patterns: list[str] = []
+        exclude_patterns: list[str] = []
+        purpose: str | None = None
+        code_root = watch_path
+
+        profile_name = "default"
+        out = watch_path / "graphify-out"
+        if profile is not None:
+            profile_name = validate_graph_output_name(profile, allow_default=False)
+            profile_config = resolve_graph_profile(watch_path, profile_name)
+            include_patterns = profile_config["includes"]
+            exclude_patterns = profile_config["excludes"]
+            purpose = profile_config["purpose"]
+            out = out / profile_name
+
+        code_files = collect_files(
+            code_root,
+            follow_symlinks=follow_symlinks,
+            include_patterns=include_patterns,
+            exclude_patterns=exclude_patterns,
+        )
         code_files = [
             f for f in code_files
             if "graphify-out" not in f.parts
@@ -49,22 +74,26 @@ def _rebuild_code(watch_path: Path, *, follow_symlinks: bool = False) -> bool:
             "total_files": len(code_files),
             "total_words": 0,  # not needed during watch rebuild
         }
-
-        G = build_from_json(result)
-        communities = cluster(G)
-        cohesion = score_all(G, communities)
-        gods = god_nodes(G)
-        surprises = surprising_connections(G, communities)
-        labels = {cid: "Community " + str(cid) for cid in communities}
-        questions = suggest_questions(G, communities, labels)
-
-        out = watch_path / "graphify-out"
-        out.mkdir(exist_ok=True)
-
-        report = generate(G, communities, cohesion, labels, gods, surprises, detection,
-                          {"input": 0, "output": 0}, str(watch_path), suggested_questions=questions)
-        (out / "GRAPH_REPORT.md").write_text(report)
-        to_json(G, communities, str(out / "graph.json"))
+        outputs = build_graph_outputs(
+            result,
+            detection,
+            root=watch_path,
+            output_dir=out,
+            write_html=write_html,
+            write_graphml=write_graphml,
+        )
+        G = outputs["graph"]
+        communities = outputs["communities"]
+        html_written = outputs["html_written"]
+        register_graph_output(
+            profile_name,
+            out,
+            root=watch_path,
+            purpose=purpose,
+            includes=include_patterns,
+            excludes=exclude_patterns,
+            index_path=watch_path / "graphify-out" / "index.json",
+        )
 
         # clear stale needs_update flag if present
         flag = out / "needs_update"
@@ -73,7 +102,12 @@ def _rebuild_code(watch_path: Path, *, follow_symlinks: bool = False) -> bool:
 
         print(f"[graphify watch] Rebuilt: {G.number_of_nodes()} nodes, "
               f"{G.number_of_edges()} edges, {len(communities)} communities")
-        print(f"[graphify watch] graph.json and GRAPH_REPORT.md updated in {out}")
+        written = ["graph.json", "GRAPH_REPORT.md"]
+        if html_written:
+            written.append("graph.html")
+        if write_graphml:
+            written.append("graph.graphml")
+        print(f"[graphify watch] {', '.join(written)} updated in {out}")
         return True
 
     except Exception as exc:
@@ -96,7 +130,7 @@ def _has_non_code(changed_paths: list[Path]) -> bool:
     return any(p.suffix.lower() not in _CODE_EXTENSIONS for p in changed_paths)
 
 
-def watch(watch_path: Path, debounce: float = 3.0) -> None:
+def watch(watch_path: Path, debounce: float = 3.0, *, profile: str | None = None) -> None:
     """
     Watch watch_path for new or modified files and auto-update the graph.
 
@@ -154,7 +188,7 @@ def watch(watch_path: Path, debounce: float = 3.0) -> None:
                 if _has_non_code(batch):
                     _notify_only(watch_path)
                 else:
-                    _rebuild_code(watch_path)
+                    _rebuild_code(watch_path, profile=profile)
     except KeyboardInterrupt:
         print("\n[graphify watch] Stopped.")
     finally:
@@ -162,11 +196,19 @@ def watch(watch_path: Path, debounce: float = 3.0) -> None:
         observer.join()
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Watch a folder and auto-update the graphify graph")
     parser.add_argument("path", nargs="?", default=".", help="Folder to watch (default: .)")
     parser.add_argument("--debounce", type=float, default=3.0,
                         help="Seconds to wait after last change before updating (default: 3)")
-    args = parser.parse_args()
-    watch(Path(args.path), debounce=args.debounce)
+    parser.add_argument(
+        "--profile",
+        help="Optional named output profile. Writes code-only rebuilds into graphify-out/<profile>/.",
+    )
+    args = parser.parse_args(argv)
+    watch(Path(args.path), debounce=args.debounce, profile=args.profile)
+
+
+if __name__ == "__main__":
+    main()

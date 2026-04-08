@@ -128,7 +128,10 @@ def install(platform: str = "claude") -> None:
     print()
     print("Done. Open your AI coding assistant and type:")
     print()
-    print("  /graphify .")
+    if platform == "codex":
+        print("  $graphify .")
+    else:
+        print("  /graphify .")
     print()
 
 
@@ -138,9 +141,10 @@ _CLAUDE_MD_SECTION = """\
 This project has a graphify knowledge graph at graphify-out/.
 
 Rules:
+- If graphify-out/index.json exists, read it first to locate the current default graph output
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `python3 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` to keep the graph current
+- After modifying code files in this session, refresh the graph with `graphify rebuild-code .`; if you are using named profiles, rerun `graphify rebuild-code . --profile <name>` for the relevant graph view
 """
 
 _CLAUDE_MD_MARKER = "## graphify"
@@ -153,9 +157,10 @@ _AGENTS_MD_SECTION = """\
 This project has a graphify knowledge graph at graphify-out/.
 
 Rules:
+- If graphify-out/index.json exists, read it first to locate the current default graph output
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `python3 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` to keep the graph current
+- After modifying code files in this session, refresh the graph with `graphify rebuild-code .`; if you are using named profiles, rerun `graphify rebuild-code . --profile <name>` for the relevant graph view
 """
 
 _AGENTS_MD_MARKER = "## graphify"
@@ -384,6 +389,30 @@ def main() -> None:
         print()
         print("Commands:")
         print("  install [--platform P]  copy skill to platform config dir (claude|windows|codex|opencode|claw|droid|trae|trae-cn)")
+        print("  discover-profiles [path]  inspect a target repo and propose named graph profiles")
+        print("    --write                 save the proposed profiles to .graphifyprofiles.json in the target path")
+        print("    --rename old=new        rename a proposed profile before saving it")
+        print("  build-profiles [path]    discover, save, and rebuild all proposed named graph profiles")
+        print("    --graphml              also export graph.graphml for each proposed profile")
+        print("    --no-html              skip graph.html generation for each proposed profile")
+        print("    --rename old=new       rename a proposed profile before saving and rebuilding it")
+        print("  prepare-profile [path]  prepare a multimodal profile-scoped run and write semantic prompt artifacts")
+        print("    --profile NAME        required named profile to prepare")
+        print("    --chunk-size N        semantic chunk size (default 22)")
+        print("    --deep-mode          render prompts with deep semantic extraction guidance")
+        print("    --follow-symlinks    include symlinked files during detect()")
+        print("  finalize-profile [path]  finalize a prepared multimodal profile run from semantic JSON")
+        print("    --profile NAME        required named profile to finalize")
+        print("    --semantic PATH       JSON file or directory containing semantic output or chunk results")
+        print("    --allow-partial       finalize even if some chunk results are missing")
+        print("    --max-failed-chunks N maximum missing chunk results allowed with --allow-partial")
+        print("    --graphml             also export graph.graphml")
+        print("    --no-html             skip graph.html generation")
+        print("  rebuild-code [path]     code-only rebuild into graphify-out/ (supports named profiles)")
+        print("    --profile NAME        write into graphify-out/<profile>/ and register in index.json")
+        print("    --graphml             also export graph.graphml")
+        print("    --no-html             skip graph.html generation")
+        print("    --follow-symlinks     include symlinked files during code collection")
         print("  query \"<question>\"       BFS traversal of graph.json for a question")
         print("    --dfs                   use depth-first instead of breadth-first")
         print("    --budget N              cap output at N tokens (default 2000)")
@@ -458,17 +487,363 @@ def main() -> None:
         else:
             print("Usage: graphify hook [install|uninstall|status]", file=sys.stderr)
             sys.exit(1)
+    elif cmd == "discover-profiles":
+        from graphify.discover import apply_profile_renames, discover_profiles, save_discovered_profiles
+
+        path = Path(".")
+        write_profiles = False
+        rename_map: dict[str, str] = {}
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--write":
+                write_profiles = True
+                i += 1
+            elif arg == "--rename" and i + 1 < len(args):
+                source, sep, target = args[i + 1].partition("=")
+                if not sep or not source or not target:
+                    print(
+                        "Usage: graphify discover-profiles [path] [--write] [--rename old=new]",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                rename_map[source] = target
+                i += 2
+            elif arg.startswith("--rename="):
+                source, sep, target = arg[len("--rename="):].partition("=")
+                if not sep or not source or not target:
+                    print(
+                        "Usage: graphify discover-profiles [path] [--write] [--rename old=new]",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                rename_map[source] = target
+                i += 1
+            elif arg.startswith("-"):
+                print(
+                    "Usage: graphify discover-profiles [path] [--write] [--rename old=new]",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            else:
+                path = Path(arg)
+                i += 1
+
+        proposal = discover_profiles(path)
+        state = proposal.get("graphify_state", {})
+        if state.get("profiles_path") and rename_map:
+            print(
+                "Cannot rename profiles while reusing an existing .graphifyprofiles.json. "
+                "Remove the saved profile file and graphify-out/ outputs to force rediscovery first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if rename_map:
+            proposal = apply_profile_renames(proposal, rename_map)
+        print(json.dumps(proposal, indent=2))
+        if state.get("profiles_path"):
+            print(
+                f"\nFound existing saved profiles at {state['profiles_path']}: "
+                f"{', '.join(state.get('profile_names', [])) or '(none)'}"
+            )
+        if state.get("index_path"):
+            print(
+                f"Found existing indexed outputs at {state['index_path']}: "
+                f"{', '.join(state.get('indexed_graph_names', [])) or '(none)'}"
+            )
+        if state.get("profiles_path") or state.get("index_path"):
+            print("Remove the existing profile file and graphify-out/ outputs to force a full rediscovery.")
+        if write_profiles:
+            target = save_discovered_profiles(proposal, root=path)
+            print(f"\nSaved profile proposal to {target}")
+    elif cmd == "build-profiles":
+        from graphify.discover import apply_profile_renames, discover_profiles, save_discovered_profiles
+        from graphify.profiles import load_graph_profiles
+        from graphify.watch import _rebuild_code
+
+        path = Path(".")
+        write_html = True
+        write_graphml = False
+        rename_map: dict[str, str] = {}
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--graphml":
+                write_graphml = True
+                i += 1
+            elif arg == "--no-html":
+                write_html = False
+                i += 1
+            elif arg == "--rename" and i + 1 < len(args):
+                source, sep, target = args[i + 1].partition("=")
+                if not sep or not source or not target:
+                    print(
+                        "Usage: graphify build-profiles [path] [--graphml] [--no-html] [--rename old=new]",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                rename_map[source] = target
+                i += 2
+            elif arg.startswith("--rename="):
+                source, sep, target = arg[len("--rename="):].partition("=")
+                if not sep or not source or not target:
+                    print(
+                        "Usage: graphify build-profiles [path] [--graphml] [--no-html] [--rename old=new]",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                rename_map[source] = target
+                i += 1
+            elif arg.startswith("-"):
+                print(
+                    "Usage: graphify build-profiles [path] [--graphml] [--no-html] [--rename old=new]",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            else:
+                path = Path(arg)
+                i += 1
+
+        proposal = discover_profiles(path)
+        print(json.dumps(proposal, indent=2))
+        state = proposal.get("graphify_state", {})
+        profile_names: list[str]
+
+        if state.get("profiles_path"):
+            if rename_map:
+                print(
+                    "Cannot rename profiles while reusing an existing .graphifyprofiles.json. "
+                    "Remove the saved profile file and graphify-out/ outputs to force rediscovery first.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            existing_profiles = load_graph_profiles(path)
+            profile_names = sorted(existing_profiles)
+            print(
+                f"\nReusing existing saved profiles from {state['profiles_path']}: "
+                f"{', '.join(profile_names) or '(none)'}"
+            )
+            if state.get("index_path"):
+                print(
+                    f"Refreshing indexed outputs tracked in {state['index_path']}: "
+                    f"{', '.join(state.get('indexed_graph_names', [])) or '(none)'}"
+                )
+            print("Remove the existing profile file and graphify-out/ outputs to force a full rediscovery.")
+        else:
+            if not proposal.get("profiles"):
+                print("\nNo named profiles proposed for this target.")
+                sys.exit(1)
+            if rename_map:
+                proposal = apply_profile_renames(proposal, rename_map)
+            target = save_discovered_profiles(proposal, root=path)
+            print(f"\nSaved profile proposal to {target}")
+            profile_names = list(proposal["profiles"])
+
+        for profile_name in profile_names:
+            ok = _rebuild_code(
+                path,
+                profile=profile_name,
+                write_html=write_html,
+                write_graphml=write_graphml,
+            )
+            if not ok:
+                sys.exit(1)
+    elif cmd == "rebuild-code":
+        from graphify.watch import _rebuild_code
+
+        path = Path(".")
+        profile = None
+        follow_symlinks = False
+        write_html = True
+        write_graphml = False
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--profile" and i + 1 < len(args):
+                profile = args[i + 1]
+                i += 2
+            elif arg.startswith("--profile="):
+                profile = arg.split("=", 1)[1]
+                i += 1
+            elif arg == "--graphml":
+                write_graphml = True
+                i += 1
+            elif arg == "--no-html":
+                write_html = False
+                i += 1
+            elif arg == "--follow-symlinks":
+                follow_symlinks = True
+                i += 1
+            elif arg.startswith("-"):
+                print(
+                    f"Usage: graphify rebuild-code [path] [--profile NAME] [--graphml] [--no-html] [--follow-symlinks]",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            else:
+                path = Path(arg)
+                i += 1
+
+        ok = _rebuild_code(
+            path,
+            follow_symlinks=follow_symlinks,
+            profile=profile,
+            write_html=write_html,
+            write_graphml=write_graphml,
+        )
+        if not ok:
+            sys.exit(1)
+    elif cmd == "prepare-profile":
+        from graphify.multimodal import prepare_profile_run
+
+        path = Path(".")
+        profile = None
+        follow_symlinks = False
+        chunk_size = 22
+        deep_mode = False
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--profile" and i + 1 < len(args):
+                profile = args[i + 1]
+                i += 2
+            elif arg.startswith("--profile="):
+                profile = arg.split("=", 1)[1]
+                i += 1
+            elif arg == "--chunk-size" and i + 1 < len(args):
+                chunk_size = int(args[i + 1])
+                i += 2
+            elif arg.startswith("--chunk-size="):
+                chunk_size = int(arg.split("=", 1)[1])
+                i += 1
+            elif arg == "--deep-mode":
+                deep_mode = True
+                i += 1
+            elif arg == "--follow-symlinks":
+                follow_symlinks = True
+                i += 1
+            elif arg.startswith("-"):
+                print(
+                    "Usage: graphify prepare-profile [path] --profile NAME [--chunk-size N] [--deep-mode] [--follow-symlinks]",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            else:
+                path = Path(arg)
+                i += 1
+        if not profile:
+            print(
+                "Usage: graphify prepare-profile [path] --profile NAME [--chunk-size N] [--deep-mode] [--follow-symlinks]",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        result = prepare_profile_run(
+            path,
+            profile=profile,
+            follow_symlinks=follow_symlinks,
+            chunk_size=chunk_size,
+            deep_mode=deep_mode,
+        )
+        print(json.dumps(result["metadata"], indent=2))
+        print(f"\nDetection: {result['detection_path']}")
+        print(f"AST: {result['ast_path']}")
+        print(f"Semantic prep: {result['semantic_prep_path']}")
+        print(f"Prompts: {result['prompts_path']}")
+        if result["needs_semantic_extraction"]:
+            print("Semantic extraction is required before finalizing this profile.")
+        else:
+            print("No semantic extraction is required for this prepared profile run.")
+    elif cmd == "finalize-profile":
+        from graphify.multimodal import finalize_profile_run
+
+        path = Path(".")
+        profile = None
+        semantic = None
+        write_html = True
+        write_graphml = False
+        allow_partial = False
+        max_failed_chunks = None
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--profile" and i + 1 < len(args):
+                profile = args[i + 1]
+                i += 2
+            elif arg.startswith("--profile="):
+                profile = arg.split("=", 1)[1]
+                i += 1
+            elif arg == "--semantic" and i + 1 < len(args):
+                semantic = args[i + 1]
+                i += 2
+            elif arg.startswith("--semantic="):
+                semantic = arg.split("=", 1)[1]
+                i += 1
+            elif arg == "--graphml":
+                write_graphml = True
+                i += 1
+            elif arg == "--no-html":
+                write_html = False
+                i += 1
+            elif arg == "--allow-partial":
+                allow_partial = True
+                i += 1
+            elif arg == "--max-failed-chunks" and i + 1 < len(args):
+                max_failed_chunks = int(args[i + 1])
+                i += 2
+            elif arg.startswith("--max-failed-chunks="):
+                max_failed_chunks = int(arg.split("=", 1)[1])
+                i += 1
+            elif arg.startswith("-"):
+                print(
+                    "Usage: graphify finalize-profile [path] --profile NAME --semantic PATH [--allow-partial] [--max-failed-chunks N] [--graphml] [--no-html]",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            else:
+                path = Path(arg)
+                i += 1
+        if not profile or not semantic:
+            print(
+                "Usage: graphify finalize-profile [path] --profile NAME --semantic PATH [--allow-partial] [--max-failed-chunks N] [--graphml] [--no-html]",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        result = finalize_profile_run(
+            path,
+            profile=profile,
+            semantic_results_path=semantic,
+            write_html=write_html,
+            write_graphml=write_graphml,
+            allow_partial=allow_partial,
+            max_failed_chunks=max_failed_chunks,
+        )
+        print(
+            f"Finalized profile {result['profile_name']} -> {result['graph_nodes']} nodes, "
+            f"{result['graph_edges']} edges, {result['communities']} communities"
+        )
+        if result["expected_chunks"]:
+            print(
+                f"Semantic chunks: {result['completed_chunks']} completed / "
+                f"{result['expected_chunks']} expected ({result['failed_chunks']} missing)"
+            )
+        print(f"Outputs written to {result['output_dir']}")
     elif cmd == "query":
         if len(sys.argv) < 3:
             print("Usage: graphify query \"<question>\" [--dfs] [--budget N] [--graph path]", file=sys.stderr)
             sys.exit(1)
+        from graphify.index import resolve_default_graph_path
         from graphify.serve import _score_nodes, _bfs, _dfs, _subgraph_to_text
         from graphify.security import sanitize_label
         from networkx.readwrite import json_graph
         question = sys.argv[2]
         use_dfs = "--dfs" in sys.argv
         budget = 2000
-        graph_path = "graphify-out/graph.json"
+        graph_path = None
         args = sys.argv[3:]
         i = 0
         while i < len(args):
@@ -490,6 +865,8 @@ def main() -> None:
                 graph_path = args[i + 1]; i += 2
             else:
                 i += 1
+        if graph_path is None:
+            graph_path = str(resolve_default_graph_path())
         # Load graph directly — validate_graph_path restricts to graphify-out/
         # so for custom --graph paths we resolve and load directly after existence check
         gp = Path(graph_path).resolve()
@@ -520,7 +897,7 @@ def main() -> None:
         print(_subgraph_to_text(G, nodes, edges, token_budget=budget))
     elif cmd == "benchmark":
         from graphify.benchmark import run_benchmark, print_benchmark
-        graph_path = sys.argv[2] if len(sys.argv) > 2 else "graphify-out/graph.json"
+        graph_path = sys.argv[2] if len(sys.argv) > 2 else None
         # Try to load corpus_words from detect output
         corpus_words = None
         detect_path = Path(".graphify_detect.json")

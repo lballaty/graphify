@@ -5,11 +5,14 @@ import sys
 from pathlib import Path
 import networkx as nx
 from networkx.readwrite import json_graph
+from graphify.index import resolve_default_graph_path
 from graphify.security import validate_graph_path, sanitize_label
 
 
-def _load_graph(graph_path: str) -> nx.Graph:
+def _load_graph(graph_path: str | None = None) -> nx.Graph:
     try:
+        if graph_path is None:
+            graph_path = str(resolve_default_graph_path())
         safe = validate_graph_path(graph_path)
         data = json.loads(safe.read_text())
         try:
@@ -103,7 +106,7 @@ def _find_node(G: nx.Graph, label: str) -> list[str]:
             if term in d.get("label", "").lower() or term == nid.lower()]
 
 
-def serve(graph_path: str = "graphify-out/graph.json") -> None:
+def serve(graph_path: str | None = None) -> None:
     """Start the MCP server. Requires pip install mcp."""
     try:
         from mcp.server import Server
@@ -321,5 +324,5 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
 
 
 if __name__ == "__main__":
-    graph_path = sys.argv[1] if len(sys.argv) > 1 else "graphify-out/graph.json"
+    graph_path = sys.argv[1] if len(sys.argv) > 1 else None
     serve(graph_path)

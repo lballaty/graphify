@@ -6,14 +6,16 @@
 [![PyPI](https://img.shields.io/pypi/v/graphifyy)](https://pypi.org/project/graphifyy/)
 [![Sponsor](https://img.shields.io/badge/sponsor-safishamsi-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/safishamsi)
 
-**An AI coding assistant skill.** Type `/graphify` in Claude Code, Codex, OpenCode, OpenClaw, Factory Droid, or Trae - it reads your files, builds a knowledge graph, and gives you back structure you didn't know was there. Understand a codebase faster. Find the "why" behind architectural decisions.
+**An AI coding assistant skill.** Type `/graphify` in Claude Code, OpenCode, OpenClaw, or Factory Droid, or `$graphify` in Codex - it reads your files, builds a knowledge graph, and gives you back structure you didn't know was there. Understand a codebase faster. Find the "why" behind architectural decisions.
+In Trae, use `/graphify` as well.
 
 Fully multimodal. Drop in code, PDFs, markdown, screenshots, diagrams, whiteboard photos, even images in other languages - graphify uses Claude vision to extract concepts and relationships from all of it and connects them into one graph. 20 languages supported via tree-sitter AST (Python, JS, TS, Go, Rust, Java, C, C++, Ruby, C#, Kotlin, Scala, PHP, Swift, Lua, Zig, PowerShell, Elixir, Objective-C, Julia).
 
 > Andrej Karpathy keeps a `/raw` folder where he drops papers, tweets, screenshots, and notes. graphify is the answer to that problem - 71.5x fewer tokens per query vs reading the raw files, persistent across sessions, honest about what it found vs guessed.
 
-```
-/graphify .                        # works on any folder - your codebase, notes, papers, anything
+```text
+Claude/OpenCode/OpenClaw/Droid: /graphify .
+Codex: $graphify .
 ```
 
 ```
@@ -21,6 +23,7 @@ graphify-out/
 ├── graph.html       interactive graph - click nodes, search, filter by community
 ├── GRAPH_REPORT.md  god nodes, surprising connections, suggested questions
 ├── graph.json       persistent graph - query weeks later without re-reading
+├── index.json       graph registry - points assistants to the default graph output
 └── cache/           SHA256 cache - re-runs only process changed files
 ```
 
@@ -78,6 +81,70 @@ Then open your AI coding assistant and type:
 
 Note: Codex uses `$` instead of `/` for skill calling, so type `$graphify .` instead.
 
+### Direct CLI usage
+
+Graphify can also be used directly against any target repo or directory path:
+
+```bash
+graphify build-profiles /path/to/repo
+graphify build-profiles /path/to/repo --rename core=runtime
+graphify discover-profiles /path/to/repo
+graphify discover-profiles /path/to/repo --rename core=runtime
+graphify discover-profiles /path/to/repo --write
+graphify discover-profiles /path/to/repo --write --rename core=runtime
+graphify rebuild-code /path/to/repo
+graphify rebuild-code /path/to/repo --profile core
+graphify rebuild-code /path/to/repo --profile training --graphml
+graphify prepare-profile /path/to/repo --profile platform-docs --deep-mode
+graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-semantic.json
+python3 -m graphify.watch /path/to/repo --profile core
+```
+
+These commands always write outputs into the target path's own `graphify-out/` directory.
+Graphify also writes `graphify-out/README.md` in the target repo, describing what the generated files are, how assistants should use `index.json`, and how the outputs can be refreshed later.
+
+Recommended multi-profile flow:
+
+1. Point Graphify at a target repo root and inspect the initial proposal:
+   `graphify discover-profiles /path/to/repo`
+2. Review that proposal with the assistant and the user before writing anything for complex repos.
+   The heuristic output is only a first draft. For monorepos and large mixed codebases, use the analysis step to decide:
+   - which directories should become separate profiles
+   - which directories should be merged into one profile
+   - which paths should be excluded from graphing
+   - whether proposed names like `core` should be renamed to repo-specific names like `platform-backend`, `platform-ui`, or `docs-reader`
+3. Persist only the confirmed proposal into the target repo:
+   `graphify discover-profiles /path/to/repo --write`
+   If you want to rename the proposed profiles before saving them, add one or more rename overrides:
+   `graphify discover-profiles /path/to/repo --write --rename core=runtime --rename training=model-training`
+4. Or, for a first-time repo where the initial proposal is already acceptable, you can go directly from discovery to saved outputs:
+   `graphify build-profiles /path/to/repo`
+   `graphify build-profiles /path/to/repo --rename core=runtime`
+5. Rebuild individual graph views later as needed:
+   `graphify rebuild-code /path/to/repo --profile core`
+   `graphify rebuild-code /path/to/repo --profile training`
+6. For multimodal-heavy profiles, prepare the profile-scoped run state and semantic prompt artifacts first:
+   `graphify prepare-profile /path/to/repo --profile platform-docs --deep-mode`
+   This writes `detection.json`, `ast.json`, semantic cache/chunk state, and `semantic-prompts.json` under `graphify-out/<profile>/.graphify-state/`.
+7. After semantic extraction results are available, finalize the prepared profile run:
+   `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-semantic.json`
+   or point at a directory of batch-result JSON files:
+   `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-batches`
+   The semantic input can be one merged payload, a list of chunk payloads, or a directory of JSON batch files.
+8. If some semantic batches timed out or failed, you can still finalize with the original Graphify failure policy:
+   `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-batches --allow-partial --max-failed-chunks 2`
+   This keeps partial success explicit instead of silently ignoring missing chunks.
+
+When `--write` is used, Graphify saves the confirmed profiles into the target repo as `.graphifyprofiles.json` so future rebuilds are repeatable.
+
+If the target repo already has `.graphifyprofiles.json` and/or `graphify-out/index.json`, Graphify now detects that existing state and reuses it by default when rebuilding named profile outputs. To force a full rediscovery, remove the saved profile file and prior `graphify-out/` outputs first.
+
+`build-profiles` also accepts `--rename old=new` for first-time runs, so you can go directly from discovery to saved, user-confirmed profile names in one command. When Graphify is reusing an existing `.graphifyprofiles.json`, renames are rejected to avoid silently changing established targets.
+
+For complex repos, the intended workflow is assistant-guided review before `--write` or `build-profiles`. This matters when a dominant subtree can hide important internal boundaries such as AI backends, edge functions, database/schema areas, Flutter or other frontends, and large testing surfaces.
+
+Today, `build-profiles` reuses the fast code-only rebuild path under the hood. In practice, that means it is currently suitable for code-buildable profiles. Documentation-heavy or mixed multimodal profiles should use the `prepare-profile` / `finalize-profile` path, which now scopes the original multimodal Graphify flow to a named profile.
+
 ### Make your assistant always use the graph (recommended)
 
 After building a graph, run this once in your project:
@@ -92,7 +159,7 @@ After building a graph, run this once in your project:
 | Trae | `graphify trae install` |
 | Trae CN | `graphify trae-cn install` |
 
-**Claude Code** does two things: writes a `CLAUDE.md` section telling Claude to read `graphify-out/GRAPH_REPORT.md` before answering architecture questions, and installs a **PreToolUse hook** (`settings.json`) that fires before every Glob and Grep call. If a knowledge graph exists, Claude sees: _"graphify: Knowledge graph exists. Read GRAPH_REPORT.md for god nodes and community structure before searching raw files."_ — so Claude navigates via the graph instead of grepping through every file.
+**Claude Code** does two things: writes a `CLAUDE.md` section telling Claude to read `graphify-out/index.json` first when present, then `graphify-out/GRAPH_REPORT.md`, before answering architecture questions, and installs a **PreToolUse hook** (`settings.json`) that fires before every Glob and Grep call. If a knowledge graph exists, Claude sees: _"graphify: Knowledge graph exists. Read GRAPH_REPORT.md for god nodes and community structure before searching raw files."_ — so Claude navigates via the graph instead of grepping through every file.
 
 **Codex** writes to `AGENTS.md` and also installs a **PreToolUse hook** in `.codex/hooks.json` that fires before every Bash tool call — same always-on mechanism as Claude Code.
 
@@ -102,9 +169,9 @@ Uninstall with the matching uninstall command (e.g. `graphify claude uninstall`)
 
 **Always-on vs explicit trigger — what's the difference?**
 
-The always-on hook surfaces `GRAPH_REPORT.md` — a one-page summary of god nodes, communities, and surprising connections. Your assistant reads this before searching files, so it navigates by structure instead of keyword matching. That covers most everyday questions.
+The always-on hook surfaces the graph outputs: `graphify-out/index.json` when present, plus `GRAPH_REPORT.md` as the one-page summary of god nodes, communities, and surprising connections. Your assistant should use the index to locate the current graph, then read the report before searching files. That covers most everyday questions.
 
-`/graphify query`, `/graphify path`, and `/graphify explain` go deeper: they traverse the raw `graph.json` hop by hop, trace exact paths between nodes, and surface edge-level detail (relation type, confidence score, source location). Use them when you want a specific question answered from the graph rather than a general orientation.
+`/graphify query`, `/graphify path`, and `/graphify explain` go deeper: they traverse the raw `graph.json` hop by hop, trace exact paths between nodes, and surface edge-level detail (relation type, confidence score, source location). Use them when you want a specific question answered from the graph rather than a general orientation. In Codex, use the same commands with the `$graphify` trigger.
 
 Think of it this way: the always-on hook gives your assistant a map. The `/graphify` commands let it navigate the map precisely.
 
@@ -211,6 +278,8 @@ graphify trae-cn install           # AGENTS.md (Trae CN)
 graphify trae-cn uninstall
 
 # query the graph directly from the terminal (no AI assistant needed)
+graphify rebuild-code . --profile core
+graphify rebuild-code . --profile training --graphml
 graphify query "what connects attention to the optimizer?"
 graphify query "show the auth flow" --dfs
 graphify query "what is CfgNode?" --budget 500
@@ -246,6 +315,78 @@ Works with any mix of file types:
 **Token benchmark** - printed automatically after every run. On a mixed corpus (Karpathy repos + papers + images): **71.5x** fewer tokens per query vs reading raw files. The first run extracts and builds the graph (this costs tokens). Every subsequent query reads the compact graph instead of raw files — that's where the savings compound. The SHA256 cache means re-runs only re-process changed files.
 
 **Auto-sync** (`--watch`) - run in a background terminal and the graph updates itself as your codebase changes. Code file saves trigger an instant rebuild (AST only, no LLM). Doc/image changes notify you to run `--update` for the LLM re-pass.
+
+Standard rebuilds also keep `graphify-out/index.json` up to date with a `default` graph entry pointing at the current `graph.json` and `GRAPH_REPORT.md`. This keeps graph paths repo-relative rather than machine-specific.
+
+If you use the lower-level watcher directly, `python3 -m graphify.watch PATH --profile core` writes code-only rebuilds into `graphify-out/core/`, generates `graph.html`, and registers `core` in `index.json`.
+
+If you want the same code-only rebuild path without starting a watcher, `graphify rebuild-code PATH --profile core` uses the same pipeline. Add `--graphml` when you also want `graph.graphml` beside the profile-local `graph.json`, `GRAPH_REPORT.md`, and `graph.html`.
+
+The original single-graph flow is still the default and does not require any profile config:
+
+```bash
+graphify rebuild-code /path/to/repo
+```
+
+That writes the default outputs into:
+
+```text
+/path/to/repo/graphify-out/graph.json
+/path/to/repo/graphify-out/GRAPH_REPORT.md
+/path/to/repo/graphify-out/index.json
+```
+
+`.graphifyprofiles.json` is optional and is only used when you want named profiles such as `--profile core` or `--profile platform-backend`.
+
+### Profile Config Reference
+
+Named profiles are defined in `PATH/.graphifyprofiles.json`.
+
+Format:
+- top-level `profiles` object
+- each key is the profile name
+- each profile value is an object with:
+  - `purpose`: optional string
+  - `includes`: required list of glob-like path patterns
+  - `excludes`: required list of glob-like path patterns
+
+Rules enforced by Graphify:
+- profile names must be safe output names matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`
+- `includes` must be a list of strings
+- `excludes` must be a list of strings
+- `purpose` must be a string when present
+
+Patterns are repo-relative. Common examples:
+- `docs/**` for a whole subtree
+- `README*.md` for root-level files by name pattern
+- `**/node_modules/**` for broad recursive exclusion
+
+Example:
+
+```json
+{
+  "profiles": {
+    "core": {
+      "purpose": "Main platform/runtime graph",
+      "includes": ["config/**", "platform/**", "utils/**", "tests/**"],
+      "excludes": ["training/**"]
+    },
+    "training": {
+      "purpose": "Training and fine-tuning workflows",
+      "includes": ["training/**"],
+      "excludes": []
+    }
+  }
+}
+```
+
+Profile filters are applied before extraction, so different profiles produce genuinely different graphs rather than just different output folders.
+
+Named profile rebuilds now support two paths:
+- `graphify rebuild-code PATH --profile NAME` for the fast code-only rebuild flow
+- `graphify prepare-profile ...` + `graphify finalize-profile ...` for docs, papers, images, and mixed multimodal profiles
+
+The multimodal path reuses Graphify's original extraction model: profile filtering happens first, then Graphify runs the same structural and semantic extraction stages on the filtered corpus instead of inventing a separate profile-specific graph model.
 
 **Git hooks** (`graphify hook install`) - installs post-commit and post-checkout hooks. Graph rebuilds automatically after every commit and every branch switch. If a rebuild fails, the hook exits with a non-zero code so git surfaces the error instead of silently continuing. No background process needed.
 

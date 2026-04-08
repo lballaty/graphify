@@ -269,7 +269,7 @@ def _load_graphifyignore(root: Path) -> list[str]:
 
 
 def _is_ignored(path: Path, root: Path, patterns: list[str]) -> bool:
-    """Return True if path matches any .graphifyignore pattern."""
+    """Return True if path matches any ignore-style pattern."""
     if not patterns:
         return False
     try:
@@ -299,12 +299,31 @@ def _is_ignored(path: Path, root: Path, patterns: list[str]) -> bool:
     return False
 
 
-def collect_code_files(root: Path, *, follow_symlinks: bool = False) -> list[Path]:
+def _matches_patterns(path: Path, root: Path, patterns: list[str]) -> bool:
+    """Return True if path matches any profile/include/exclude style pattern."""
+    return _is_ignored(path, root, patterns)
+
+
+def collect_code_files(
+    root: Path,
+    *,
+    follow_symlinks: bool = False,
+    include_patterns: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
+) -> list[Path]:
     """Collect code files while honoring the same ignore rules as detect()."""
     if root.is_file():
-        return [root] if classify_file(root) == FileType.CODE else []
+        if classify_file(root) != FileType.CODE:
+            return []
+        if exclude_patterns and _matches_patterns(root, root.parent, exclude_patterns):
+            return []
+        if include_patterns and not _matches_patterns(root, root.parent, include_patterns):
+            return []
+        return [root]
 
     ignore_patterns = _load_graphifyignore(root)
+    include_patterns = include_patterns or []
+    exclude_patterns = exclude_patterns or []
     results: list[Path] = []
 
     for dirpath, dirnames, filenames in os.walk(root, followlinks=follow_symlinks):
@@ -322,6 +341,7 @@ def collect_code_files(root: Path, *, follow_symlinks: bool = False) -> list[Pat
             if not d.startswith(".")
             and not _is_noise_dir(d)
             and not _is_ignored(dp / d, root, ignore_patterns)
+            and not _matches_patterns(dp / d, root, exclude_patterns)
         ]
 
         for fname in filenames:
@@ -331,6 +351,10 @@ def collect_code_files(root: Path, *, follow_symlinks: bool = False) -> list[Pat
             if classify_file(path) != FileType.CODE:
                 continue
             if _is_ignored(path, root, ignore_patterns):
+                continue
+            if exclude_patterns and _matches_patterns(path, root, exclude_patterns):
+                continue
+            if include_patterns and not _matches_patterns(path, root, include_patterns):
                 continue
             results.append(path)
 

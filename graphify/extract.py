@@ -2648,11 +2648,22 @@ def extract(paths: list[Path]) -> dict:
     }
 
 
-def collect_files(target: Path, *, follow_symlinks: bool = False) -> list[Path]:
+def collect_files(
+    target: Path,
+    *,
+    follow_symlinks: bool = False,
+    include_patterns: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
+) -> list[Path]:
     from .detect import collect_code_files
 
     # Preserve the public helper but delegate policy decisions to detect.py.
-    return collect_code_files(target, follow_symlinks=follow_symlinks)
+    return collect_code_files(
+        target,
+        follow_symlinks=follow_symlinks,
+        include_patterns=include_patterns,
+        exclude_patterns=exclude_patterns,
+    )
 
 
 if __name__ == "__main__":
