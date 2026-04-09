@@ -49,6 +49,7 @@ def test_codex_skill_contains_spawn_agent():
     skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text()
     assert "spawn_agent" in skill
     assert "$graphify run code <path>" in skill
+    assert "semantic-results/" in skill
 
 
 def test_opencode_skill_contains_mention():
@@ -79,6 +80,7 @@ def test_claude_skill_mentions_grouped_run_commands():
     import graphify
     skill = (Path(graphify.__file__).parent / "skill.md").read_text()
     assert "/graphify run code <path>" in skill
+    assert "semantic-results/" in skill
 
 
 def test_claude_install_registers_claude_md(tmp_path):

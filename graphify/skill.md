@@ -40,6 +40,28 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify explain "SwinTransformer"                   # plain-language explanation of a node
 ```
 
+## Grouped refresh commands
+
+Use the higher-level grouped commands when the repo already has saved profiles in `.graphifyprofiles.json`.
+
+- `/graphify run code <path>`
+  - refreshes saved `kind=code` profiles through the fast rebuild path
+- `/graphify run docs <path>`
+  - prepares saved `kind=docs`, `kind=mixed`, and `kind=planning` profiles
+  - if `graphify-out/<profile>/.graphify-state/semantic-results/` already contains JSON batch files, Graphify finalizes that profile automatically
+- `/graphify run all <path>`
+  - runs the code path first, then the docs/multimodal path
+- `/graphify update ...`
+  - alias for the same grouped workflows
+
+For grouped multimodal runs, Graphify standardizes the handoff paths:
+- `graphify-out/<profile>/.graphify-state/semantic-prompts/`
+  - one `chunk-XXX.txt` prompt file and one `chunk-XXX.json` metadata file per semantic chunk
+- `graphify-out/<profile>/.graphify-state/semantic-results/`
+  - drop one `chunk-XXX.json` extraction result file per completed chunk here
+
+Once the results directory has JSON files for a prepared profile, rerun `/graphify run docs <path>` or `/graphify run all <path>` and Graphify will auto-finalize that profile. You can also call `/graphify finalize-profile <path> --profile NAME` directly; it now defaults to the standard `semantic-results/` directory when `--semantic` is omitted.
+
 ## What graphify is for
 
 graphify is built around Andrej Karpathy's /raw folder workflow: drop anything into a folder - papers, tweets, screenshots, code, notes - and get a structured knowledge graph that shows you what you didn't know was connected.
@@ -60,6 +82,8 @@ Use it for:
 If no path was given, use `.` (current directory). Do not ask the user for a path.
 
 Follow these steps in order. Do not skip steps.
+
+If the user explicitly asked for a grouped refresh such as `/graphify run code`, `/graphify run docs`, or `/graphify run all`, prefer the grouped workflow in the section above. Use the full pipeline below for the classic `/graphify <path>` flow.
 
 ### Step 1 - Ensure graphify is installed
 
