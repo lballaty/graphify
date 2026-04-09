@@ -48,6 +48,7 @@ def test_codex_skill_contains_spawn_agent():
     import graphify
     skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text()
     assert "spawn_agent" in skill
+    assert "$graphify run code <path>" in skill
 
 
 def test_opencode_skill_contains_mention():
@@ -72,6 +73,12 @@ def test_all_skill_files_exist_in_package():
     pkg = Path(graphify.__file__).parent
     for name in ("skill.md", "skill-codex.md", "skill-opencode.md", "skill-claw.md"):
         assert (pkg / name).exists(), f"Missing: {name}"
+
+
+def test_claude_skill_mentions_grouped_run_commands():
+    import graphify
+    skill = (Path(graphify.__file__).parent / "skill.md").read_text()
+    assert "/graphify run code <path>" in skill
 
 
 def test_claude_install_registers_claude_md(tmp_path):

@@ -24,6 +24,10 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify <path> --neo4j-push bolt://localhost:7687   # push directly to Neo4j
 /graphify <path> --mcp                                # start MCP stdio server for agent access
 /graphify <path> --watch                              # watch folder, auto-rebuild on code changes (no LLM needed)
+/graphify run code <path>                            # refresh saved code-oriented profiles
+/graphify run docs <path>                            # prepare saved docs/mixed/planning profiles
+/graphify run all <path>                             # refresh code profiles and prepare multimodal ones
+/graphify update all <path>                          # alias for grouped refresh
 /graphify <path> --wiki                               # build agent-crawlable wiki (index.md + one article per community)
 /graphify <path> --obsidian --obsidian-dir ~/vaults/my-project  # write vault to custom path (e.g. existing vault)
 /graphify add <url>                                   # fetch URL, save to ./raw, update graph
@@ -1183,7 +1187,7 @@ python3 -m graphify.watch INPUT_PATH --debounce 3 --profile core
 Replace INPUT_PATH with the folder to watch. Behavior depends on what changed:
 
 - **Code files only (.py, .ts, .go, etc.):** re-runs AST extraction + rebuild + cluster immediately, no LLM needed. `graph.json` and `GRAPH_REPORT.md` are updated automatically.
-- **Docs, papers, or images:** writes a `graphify-out/needs_update` flag and prints a notification to run `/graphify --update` (LLM semantic re-extraction required).
+- **Docs, papers, or images:** writes a `graphify-out/needs_update` flag and prints a notification to run `/graphify run docs .` or `/graphify run all .` (semantic re-extraction required).
 
 Named profiles require `INPUT_PATH/.graphifyprofiles.json` with `includes` / `excludes` rules per profile. Those filters are applied before extraction.
 
@@ -1191,7 +1195,7 @@ Debounce (default 3s): waits until file activity stops before triggering, so a w
 
 Press Ctrl+C to stop.
 
-For agentic workflows: run `--watch` in a background terminal. Code changes from agent waves are picked up automatically between waves. If agents are also writing docs or notes, you'll need a manual `/graphify --update` after those waves.
+For agentic workflows: run `--watch` in a background terminal. Code changes from agent waves are picked up automatically between waves. If agents are also writing docs or notes, use `/graphify run docs .` after those waves, or `/graphify run all .` when you want the grouped refresh path.
 
 ---
 
@@ -1205,7 +1209,7 @@ graphify hook uninstall  # remove
 graphify hook status     # check
 ```
 
-After every `git commit`, the hook detects which code files changed (via `git diff HEAD~1`), re-runs AST extraction on those files, and rebuilds `graph.json` and `GRAPH_REPORT.md`. Doc/image changes are ignored by the hook - run `/graphify --update` manually for those.
+After every `git commit`, the hook detects which code files changed (via `git diff HEAD~1`), re-runs AST extraction on those files, and rebuilds `graph.json` and `GRAPH_REPORT.md`. Doc/image changes are ignored by the hook - use `/graphify run docs .` or `/graphify run all .` manually for those.
 
 If a post-commit hook already exists, graphify appends to it rather than replacing it.
 
