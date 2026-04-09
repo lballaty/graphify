@@ -200,11 +200,11 @@ flowchart TD
     J -- all code profiles --> L[run code]
     J -- multimodal profiles --> M[run docs or prepare-profile]
     J -- full refresh --> N[run all]
-    M --> O[Graphify prepares .graphify-state and semantic prompt artifacts]
+    M --> O[Graphify prepares multimodal state and prompt artifacts]
     O --> P[LLM agent performs semantic extraction per chunk]
-    P --> Q[semantic-results directory populated]
+    P --> Q[semantic results directory populated]
     Q --> R[run docs again or finalize-profile]
-    K --> S[graphify-out updated]
+    K --> S[graphify-out outputs updated]
     L --> S
     N --> S
     R --> S
@@ -345,16 +345,16 @@ sequenceDiagram
     Graphify->>Repo: load saved profiles
     Graphify->>Graphify: select docs/mixed/planning profiles
     loop each selected profile
-        Graphify->>Repo: prepare .graphify-state
-        Graphify->>Repo: write semantic-prompts/chunk-XXX.txt
-        Graphify->>Repo: create semantic-results/
-        alt semantic-results already populated
+        Graphify->>Repo: prepare multimodal state
+        Graphify->>Repo: write prompt chunk files
+        Graphify->>Repo: create semantic results directory
+        alt semantic results already populated
             Graphify->>Repo: finalize profile automatically
         else semantic results missing
             Graphify-->>Agent: prepared profile, semantic extraction required
             Agent->>Model: execute each chunk prompt
             Model-->>Agent: chunk JSON results
-            Agent->>Repo: write chunk-XXX.json into semantic-results/
+            Agent->>Repo: write chunk JSON files into semantic results directory
             Agent->>Graphify: graphify run docs PATH or finalize-profile PATH --profile NAME
             Graphify->>Repo: merge semantic results and finalize outputs
         end
@@ -380,10 +380,10 @@ sequenceDiagram
     alt any multimodal profile already has semantic results
         Graphify->>Repo: auto-finalize it
     else semantic extraction still needed
-        Graphify-->>Agent: prompts are ready in semantic-prompts/
+        Graphify-->>Agent: prompt chunk files are ready
         Agent->>Model: run chunk extraction
         Model-->>Agent: JSON chunk outputs
-        Agent->>Repo: write semantic-results/chunk-XXX.json
+        Agent->>Repo: write chunk JSON files into semantic results directory
         Agent->>Graphify: graphify run all PATH or finalize-profile for specific profile
         Graphify->>Repo: finalize remaining multimodal profiles
     end
