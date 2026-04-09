@@ -92,6 +92,9 @@ graphify discover-profiles /path/to/repo
 graphify discover-profiles /path/to/repo --rename core=runtime
 graphify discover-profiles /path/to/repo --write
 graphify discover-profiles /path/to/repo --write --rename core=runtime
+graphify run code /path/to/repo
+graphify run docs /path/to/repo
+graphify run all /path/to/repo
 graphify rebuild-code /path/to/repo
 graphify rebuild-code /path/to/repo --profile core
 graphify rebuild-code /path/to/repo --profile training --graphml
@@ -123,15 +126,21 @@ Recommended multi-profile flow:
 5. Rebuild individual graph views later as needed:
    `graphify rebuild-code /path/to/repo --profile core`
    `graphify rebuild-code /path/to/repo --profile training`
-6. For multimodal-heavy profiles, prepare the profile-scoped run state and semantic prompt artifacts first:
+6. For a grouped refresh once saved profile metadata is in place, use the higher-level commands:
+   `graphify run code /path/to/repo`
+   `graphify run docs /path/to/repo`
+   `graphify run all /path/to/repo`
+   `graphify update all /path/to/repo`
+   `run code` refreshes saved code-oriented profiles, `run docs` prepares docs/mixed/planning profiles and finalizes them when semantic results are supplied, and `run all` combines both paths.
+7. For multimodal-heavy profiles, prepare the profile-scoped run state and semantic prompt artifacts first:
    `graphify prepare-profile /path/to/repo --profile platform-docs --deep-mode`
    This writes `detection.json`, `ast.json`, semantic cache/chunk state, and `semantic-prompts.json` under `graphify-out/<profile>/.graphify-state/`.
-7. After semantic extraction results are available, finalize the prepared profile run:
+8. After semantic extraction results are available, finalize the prepared profile run:
    `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-semantic.json`
    or point at a directory of batch-result JSON files:
    `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-batches`
    The semantic input can be one merged payload, a list of chunk payloads, or a directory of JSON batch files.
-8. If some semantic batches timed out or failed, you can still finalize with the original Graphify failure policy:
+9. If some semantic batches timed out or failed, you can still finalize with the original Graphify failure policy:
    `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-batches --allow-partial --max-failed-chunks 2`
    This keeps partial success explicit instead of silently ignoring missing chunks.
 
@@ -346,6 +355,7 @@ Format:
 - top-level `profiles` object
 - each key is the profile name
 - each profile value is an object with:
+  - `kind`: optional string, one of `code`, `docs`, `mixed`, `planning`
   - `purpose`: optional string
   - `includes`: required list of glob-like path patterns
   - `excludes`: required list of glob-like path patterns
@@ -354,6 +364,7 @@ Rules enforced by Graphify:
 - profile names must be safe output names matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`
 - `includes` must be a list of strings
 - `excludes` must be a list of strings
+- `kind` must be one of `code`, `docs`, `mixed`, `planning` when present
 - `purpose` must be a string when present
 
 Patterns are repo-relative. Common examples:
@@ -367,11 +378,13 @@ Example:
 {
   "profiles": {
     "core": {
+      "kind": "code",
       "purpose": "Main platform/runtime graph",
       "includes": ["config/**", "platform/**", "utils/**", "tests/**"],
       "excludes": ["training/**"]
     },
     "training": {
+      "kind": "code",
       "purpose": "Training and fine-tuning workflows",
       "includes": ["training/**"],
       "excludes": []
@@ -385,6 +398,7 @@ Profile filters are applied before extraction, so different profiles produce gen
 Named profile rebuilds now support two paths:
 - `graphify rebuild-code PATH --profile NAME` for the fast code-only rebuild flow
 - `graphify prepare-profile ...` + `graphify finalize-profile ...` for docs, papers, images, and mixed multimodal profiles
+- `graphify run code|docs|all PATH` and `graphify update code|docs|all PATH` as higher-level orchestration layers over those same low-level commands
 
 The multimodal path reuses Graphify's original extraction model: profile filtering happens first, then Graphify runs the same structural and semantic extraction stages on the filtered corpus instead of inventing a separate profile-specific graph model.
 

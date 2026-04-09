@@ -378,6 +378,127 @@ def claude_uninstall(project_dir: Path | None = None) -> None:
     _uninstall_claude_hook(project_dir or Path("."))
 
 
+def _find_semantic_input_for_profile(semantic_root: str | Path | None, profile_name: str) -> Path | None:
+    """Resolve an optional per-profile semantic result path for high-level run/update commands."""
+    if not semantic_root:
+        return None
+    root = Path(semantic_root)
+    if root.is_dir():
+        candidates = [
+            root / profile_name,
+            root / f"{profile_name}.json",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+    return root if root.exists() else None
+
+
+def _run_high_level(
+    path: Path,
+    *,
+    run_type: str,
+    write_html: bool = True,
+    write_graphml: bool = False,
+    follow_symlinks: bool = False,
+    chunk_size: int = 22,
+    deep_mode: bool = False,
+    semantic_root: str | Path | None = None,
+    allow_partial: bool = False,
+    max_failed_chunks: int | None = None,
+) -> bool:
+    """Run a higher-level grouped workflow using saved profile metadata."""
+    from graphify.multimodal import finalize_profile_run, prepare_profile_run
+    from graphify.profiles import list_profiles_for_run, load_graph_profiles
+    from graphify.watch import _rebuild_code
+
+    root_path = Path(path)
+    saved_profiles = load_graph_profiles(root_path)
+
+    if run_type == "code":
+        code_profiles = list_profiles_for_run(root_path, "code")
+        if code_profiles:
+            print(
+                "Running code profiles: "
+                + ", ".join(profile["name"] for profile in code_profiles)
+            )
+            for profile in code_profiles:
+                ok = _rebuild_code(
+                    root_path,
+                    follow_symlinks=follow_symlinks,
+                    profile=profile["name"],
+                    write_html=write_html,
+                    write_graphml=write_graphml,
+                )
+                if not ok:
+                    return False
+            return True
+        if not saved_profiles:
+            print("No saved profiles found. Falling back to the default single-graph code rebuild.")
+            return _rebuild_code(
+                root_path,
+                follow_symlinks=follow_symlinks,
+                profile=None,
+                write_html=write_html,
+                write_graphml=write_graphml,
+            )
+        print("No saved code-oriented profiles were found.", file=sys.stderr)
+        return False
+
+    docs_profiles = list_profiles_for_run(root_path, "docs")
+    if run_type == "all":
+        ok = _run_high_level(
+            root_path,
+            run_type="code",
+            write_html=write_html,
+            write_graphml=write_graphml,
+            follow_symlinks=follow_symlinks,
+        )
+        if not ok:
+            return False
+
+    if not docs_profiles:
+        if run_type == "docs":
+            print("No saved docs-, mixed-, or planning-oriented profiles were found.", file=sys.stderr)
+            return False
+        return True
+
+    print(
+        "Preparing multimodal profiles: "
+        + ", ".join(profile["name"] for profile in docs_profiles)
+    )
+    for profile in docs_profiles:
+        prepared = prepare_profile_run(
+            root_path,
+            profile=profile["name"],
+            follow_symlinks=follow_symlinks,
+            chunk_size=chunk_size,
+            deep_mode=deep_mode,
+        )
+        semantic_input = _find_semantic_input_for_profile(semantic_root, profile["name"])
+        if semantic_input is not None:
+            finalized = finalize_profile_run(
+                root_path,
+                profile=profile["name"],
+                semantic_results_path=semantic_input,
+                write_html=write_html,
+                write_graphml=write_graphml,
+                allow_partial=allow_partial,
+                max_failed_chunks=max_failed_chunks,
+            )
+            print(
+                f"Finalized profile {finalized['profile_name']} -> {finalized['graph_nodes']} nodes, "
+                f"{finalized['graph_edges']} edges, {finalized['communities']} communities"
+            )
+            continue
+        print(
+            f"Prepared profile {profile['name']} -> {prepared['prompts_path']} "
+            "(semantic extraction still required before finalize)"
+        )
+    return True
+
+
 def main() -> None:
     # Check all known skill install locations for a stale version stamp
     for cfg in _PLATFORM_CONFIG.values():
@@ -396,6 +517,16 @@ def main() -> None:
         print("    --graphml              also export graph.graphml for each proposed profile")
         print("    --no-html              skip graph.html generation for each proposed profile")
         print("    --rename old=new       rename a proposed profile before saving and rebuilding it")
+        print("  run <code|docs|all> [path]  higher-level grouped profile refresh")
+        print("    --graphml              also export graph.graphml where supported")
+        print("    --no-html              skip graph.html generation")
+        print("    --follow-symlinks      include symlinked files during detect/code collection")
+        print("    --chunk-size N         semantic chunk size for multimodal profiles (default 22)")
+        print("    --deep-mode            render deep semantic extraction prompts")
+        print("    --semantic PATH        optional per-profile semantic result file/dir root for finalize")
+        print("    --allow-partial        allow missing semantic chunks when finalizing from provided results")
+        print("    --max-failed-chunks N  maximum missing semantic chunks allowed with --allow-partial")
+        print("  update <code|docs|all> [path]  alias for `graphify run ...`")
         print("  prepare-profile [path]  prepare a multimodal profile-scoped run and write semantic prompt artifacts")
         print("    --profile NAME        required named profile to prepare")
         print("    --chunk-size N        semantic chunk size (default 22)")
@@ -650,6 +781,85 @@ def main() -> None:
             )
             if not ok:
                 sys.exit(1)
+    elif cmd in {"run", "update"}:
+        if len(sys.argv) < 3:
+            print(
+                "Usage: graphify run <code|docs|all> [path] [--graphml] [--no-html] "
+                "[--follow-symlinks] [--chunk-size N] [--deep-mode] [--semantic PATH] "
+                "[--allow-partial] [--max-failed-chunks N]",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        run_type = sys.argv[2]
+        if run_type not in {"code", "docs", "all"}:
+            print("Usage: graphify run <code|docs|all> [path] ...", file=sys.stderr)
+            sys.exit(1)
+        path = Path(".")
+        write_html = True
+        write_graphml = False
+        follow_symlinks = False
+        chunk_size = 22
+        deep_mode = False
+        semantic_root = None
+        allow_partial = False
+        max_failed_chunks = None
+        args = sys.argv[3:]
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--graphml":
+                write_graphml = True
+                i += 1
+            elif arg == "--no-html":
+                write_html = False
+                i += 1
+            elif arg == "--follow-symlinks":
+                follow_symlinks = True
+                i += 1
+            elif arg == "--chunk-size" and i + 1 < len(args):
+                chunk_size = int(args[i + 1])
+                i += 2
+            elif arg.startswith("--chunk-size="):
+                chunk_size = int(arg.split("=", 1)[1])
+                i += 1
+            elif arg == "--deep-mode":
+                deep_mode = True
+                i += 1
+            elif arg == "--semantic" and i + 1 < len(args):
+                semantic_root = args[i + 1]
+                i += 2
+            elif arg.startswith("--semantic="):
+                semantic_root = arg.split("=", 1)[1]
+                i += 1
+            elif arg == "--allow-partial":
+                allow_partial = True
+                i += 1
+            elif arg == "--max-failed-chunks" and i + 1 < len(args):
+                max_failed_chunks = int(args[i + 1])
+                i += 2
+            elif arg.startswith("--max-failed-chunks="):
+                max_failed_chunks = int(arg.split("=", 1)[1])
+                i += 1
+            elif arg.startswith("-"):
+                print("Usage: graphify run <code|docs|all> [path] ...", file=sys.stderr)
+                sys.exit(1)
+            else:
+                path = Path(arg)
+                i += 1
+        ok = _run_high_level(
+            path,
+            run_type=run_type,
+            write_html=write_html,
+            write_graphml=write_graphml,
+            follow_symlinks=follow_symlinks,
+            chunk_size=chunk_size,
+            deep_mode=deep_mode,
+            semantic_root=semantic_root,
+            allow_partial=allow_partial,
+            max_failed_chunks=max_failed_chunks,
+        )
+        if not ok:
+            sys.exit(1)
     elif cmd == "rebuild-code":
         from graphify.watch import _rebuild_code
 

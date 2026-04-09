@@ -75,6 +75,12 @@ def write_graph_usage_doc(
         "  `graphify discover-profiles . --write`",
         "- Rebuild all saved code-oriented profiles:",
         "  `graphify build-profiles .`",
+        "- High-level code refresh for the current repo:",
+        "  `graphify run code .`",
+        "- High-level docs/planning refresh preparation:",
+        "  `graphify run docs .`",
+        "- High-level refresh across all saved profile groups:",
+        "  `graphify run all .`",
         "- Prepare a multimodal profile run:",
         "  `graphify prepare-profile . --profile PROFILE_NAME --deep-mode`",
         "- Finalize a multimodal profile run from semantic JSON or a directory of batch results:",
@@ -92,7 +98,8 @@ def write_graph_usage_doc(
         for name in graph_names:
             entry = index["graphs"][name]
             purpose = entry.get("purpose") or "(no purpose recorded)"
-            lines.append(f"- `{name}`: {purpose}")
+            kind = entry.get("kind") or "(kind unknown)"
+            lines.append(f"- `{name}` [{kind}]: {purpose}")
             lines.append(f"  Report: `{entry.get('report_path')}`")
             lines.append(f"  Graph: `{entry.get('graph_path')}`")
     else:
@@ -148,6 +155,7 @@ def register_graph_output(
     *,
     root: str | Path = ".",
     purpose: str | None = None,
+    kind: str | None = None,
     includes: list[str] | None = None,
     excludes: list[str] | None = None,
     index_path: str | Path = GRAPH_INDEX_PATH,
@@ -177,6 +185,7 @@ def register_graph_output(
         "graphml_path": _relativize(graphml_path, root_path) if graphml_path.exists() else None,
         "wiki_index_path": _relativize(wiki_index_path, root_path) if wiki_index_path.exists() else None,
         "purpose": purpose,
+        "kind": kind,
         "includes": includes or [],
         "excludes": excludes or [],
     }

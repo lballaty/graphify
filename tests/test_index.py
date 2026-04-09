@@ -38,6 +38,7 @@ def test_register_graph_output_writes_relative_paths(tmp_path):
         output_dir,
         root=tmp_path,
         purpose="Runtime architecture",
+        kind="code",
         includes=["src", "tests"],
         excludes=["node_modules"],
         index_path=tmp_path / "graphify-out" / "index.json",
@@ -50,6 +51,7 @@ def test_register_graph_output_writes_relative_paths(tmp_path):
     assert entry["graphml_path"] == "graphify-out/core/graph.graphml"
     assert entry["wiki_index_path"] is None
     assert entry["purpose"] == "Runtime architecture"
+    assert entry["kind"] == "code"
     assert entry["includes"] == ["src", "tests"]
     assert entry["excludes"] == ["node_modules"]
 
@@ -97,13 +99,15 @@ def test_register_graph_output_writes_usage_readme(tmp_path):
         output_dir,
         root=tmp_path,
         purpose="Runtime architecture",
+        kind="code",
         index_path=tmp_path / "graphify-out" / "index.json",
     )
 
     readme = (tmp_path / "graphify-out" / "README.md").read_text()
     assert "What to read first" in readme
     assert "graphify rebuild-code . --profile PROFILE_NAME" in readme
-    assert "`core`: Runtime architecture" in readme
+    assert "graphify run code ." in readme
+    assert "`core` [code]: Runtime architecture" in readme
 
 
 def test_write_graph_usage_doc_handles_empty_index(tmp_path):

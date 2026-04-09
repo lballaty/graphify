@@ -19,6 +19,9 @@
 - Exposed profile rebuilds through `graphify rebuild-code PATH --profile NAME`
 - Extended index entries to track optional `graph.html` / `graph.graphml` outputs
 - Added coverage for profile rebuilds, CLI parsing, and index metadata
+- Added profile kind metadata support (`code`, `docs`, `mixed`, `planning`)
+- Added high-level `graphify run <code|docs|all>` and `graphify update <code|docs|all>` commands
+- Updated repo-local `graphify-out/README.md` generation to document the higher-level run/update commands
 
 ## Next
 
@@ -85,6 +88,18 @@
   - direct CLI usage against arbitrary target paths
   - Claude Code usage
   - Codex usage
+- Automate multimodal semantic orchestration
+  - keep `prepare-profile` / `finalize-profile` as low-level recovery/debugging tools
+  - add a first-class orchestration path for semantic chunk dispatch, result collection, retries, timeout handling, and finalize
+  - preserve original graphify extraction logic and assistant-driven semantic model rather than inventing a separate provider client by default
+- Make viewer generation and access part of the standard workflow
+  - generate `graph.html` by default where feasible for both default and named outputs
+  - keep `graph.graphml` optional
+  - make assistant-facing commands able to refresh HTML outputs as part of normal run/update flows
+  - ensure target-repo usage docs explain how to open and use `graph.html`
+- Improve cross-profile assistant guidance
+  - help assistants combine docs profiles with code profiles when tracing use cases from documentation into implementation
+  - consider adding related-profile hints in `index.json` or saved profile metadata
 - Keep repo-local usage instructions current
   - target repos should receive a generated `graphify-out/README.md`
   - it should explain how to use `index.json`, `GRAPH_REPORT.md`, and `graph.json`

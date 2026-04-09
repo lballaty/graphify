@@ -114,6 +114,7 @@ def discover_profiles(root: str | Path) -> dict:
 
     if non_training_code_dirs or root_patterns:
         profiles["core"] = {
+            "kind": "code",
             "purpose": "Main runtime, application, and operational architecture excluding training-oriented subsystems.",
             "includes": [f"{name}/**" for name in non_training_code_dirs] + root_patterns,
             "excludes": [f"{name}/**" for name in training_dirs] + default_excludes,
@@ -122,6 +123,7 @@ def discover_profiles(root: str | Path) -> dict:
     if training_dirs:
         shared_dirs = [name for name in non_training_code_dirs if name.lower() in _SHARED_DIR_NAMES]
         profiles["training"] = {
+            "kind": "code",
             "purpose": "Training, model-building, dataset, and adaptation workflows.",
             "includes": [f"{name}/**" for name in training_dirs + shared_dirs],
             "excludes": default_excludes,
@@ -129,6 +131,7 @@ def discover_profiles(root: str | Path) -> dict:
 
     if training_dirs:
         profiles["full-first-party"] = {
+            "kind": "code",
             "purpose": "Broad first-party repository map across runtime and training subsystems.",
             "includes": [f"{name}/**" for name in sorted(set(non_training_code_dirs + training_dirs))] + root_patterns,
             "excludes": default_excludes,

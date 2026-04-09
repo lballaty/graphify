@@ -60,6 +60,7 @@ def detect_for_profile(
     include_patterns: list[str] = []
     exclude_patterns: list[str] = []
     purpose: str | None = None
+    kind: str | None = None
     profile_name = "default"
 
     if profile is not None:
@@ -68,6 +69,7 @@ def detect_for_profile(
         include_patterns = profile_config["includes"]
         exclude_patterns = profile_config["excludes"]
         purpose = profile_config["purpose"]
+        kind = profile_config["kind"]
         detection = filter_detection_for_profile(
             detection,
             root=root_path,
@@ -79,6 +81,7 @@ def detect_for_profile(
         "root": root_path,
         "profile_name": profile_name,
         "purpose": purpose,
+        "kind": kind,
         "includes": include_patterns,
         "excludes": exclude_patterns,
         "detection": detection,

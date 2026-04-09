@@ -39,6 +39,7 @@ def _rebuild_code(
         include_patterns: list[str] = []
         exclude_patterns: list[str] = []
         purpose: str | None = None
+        kind: str | None = None
         code_root = watch_path
 
         profile_name = "default"
@@ -49,6 +50,7 @@ def _rebuild_code(
             include_patterns = profile_config["includes"]
             exclude_patterns = profile_config["excludes"]
             purpose = profile_config["purpose"]
+            kind = profile_config["kind"]
             out = out / profile_name
 
         code_files = collect_files(
@@ -90,6 +92,7 @@ def _rebuild_code(
             out,
             root=watch_path,
             purpose=purpose,
+            kind=kind,
             includes=include_patterns,
             excludes=exclude_patterns,
             index_path=watch_path / "graphify-out" / "index.json",

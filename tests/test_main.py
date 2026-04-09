@@ -245,6 +245,106 @@ def test_main_build_profiles_rejects_rename_when_reusing_existing_profiles(monke
         main()
 
 
+def test_main_run_code_uses_saved_code_profiles(monkeypatch, tmp_path, capsys):
+    (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
+        "profiles": {
+            "platform-backend": {"kind": "code", "includes": ["src/**"], "excludes": []},
+            "platform-docs": {"kind": "docs", "includes": ["docs/**"], "excludes": []},
+        }
+    }))
+    captured = []
+
+    def fake_rebuild_code(path, *, follow_symlinks=False, profile=None, write_html=True, write_graphml=False):
+        captured.append((path, profile, write_html, write_graphml, follow_symlinks))
+        return True
+
+    monkeypatch.setattr("graphify.watch._rebuild_code", fake_rebuild_code)
+    monkeypatch.setattr(sys, "argv", ["graphify", "run", "code", str(tmp_path), "--graphml", "--no-html"])
+
+    main()
+
+    assert captured == [(Path(str(tmp_path)), "platform-backend", False, True, False)]
+    assert "Running code profiles: platform-backend" in capsys.readouterr().out
+
+
+def test_main_run_code_falls_back_to_default_rebuild_without_saved_profiles(monkeypatch, tmp_path, capsys):
+    captured = {}
+
+    def fake_rebuild_code(path, *, follow_symlinks=False, profile=None, write_html=True, write_graphml=False):
+        captured.update(
+            path=path,
+            profile=profile,
+            write_html=write_html,
+            write_graphml=write_graphml,
+            follow_symlinks=follow_symlinks,
+        )
+        return True
+
+    monkeypatch.setattr("graphify.watch._rebuild_code", fake_rebuild_code)
+    monkeypatch.setattr(sys, "argv", ["graphify", "run", "code", str(tmp_path)])
+
+    main()
+
+    assert captured["path"] == Path(str(tmp_path))
+    assert captured["profile"] is None
+    assert "Falling back to the default single-graph code rebuild" in capsys.readouterr().out
+
+
+def test_main_run_docs_prepares_multimodal_profiles(monkeypatch, tmp_path, capsys):
+    (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
+        "profiles": {
+            "platform-docs": {"kind": "docs", "includes": ["docs/**"], "excludes": []},
+            "planning-and-status": {"kind": "planning", "includes": ["plans/**"], "excludes": []},
+            "platform-backend": {"kind": "code", "includes": ["src/**"], "excludes": []},
+        }
+    }))
+    prepared = []
+
+    def fake_prepare(path, *, profile=None, follow_symlinks=False, chunk_size=22, deep_mode=False):
+        prepared.append((path, profile, chunk_size, deep_mode))
+        return {
+            "metadata": {"profile_name": profile},
+            "detection_path": tmp_path / "detection.json",
+            "ast_path": tmp_path / "ast.json",
+            "semantic_prep_path": tmp_path / "semantic-prep.json",
+            "prompts_path": tmp_path / f"{profile}-prompts.json",
+            "needs_semantic_extraction": True,
+        }
+
+    monkeypatch.setattr("graphify.multimodal.prepare_profile_run", fake_prepare)
+    monkeypatch.setattr(sys, "argv", ["graphify", "run", "docs", str(tmp_path), "--chunk-size", "10", "--deep-mode"])
+
+    main()
+
+    assert prepared == [
+        (Path(str(tmp_path)), "planning-and-status", 10, True),
+        (Path(str(tmp_path)), "platform-docs", 10, True),
+    ]
+    out = capsys.readouterr().out
+    assert "Preparing multimodal profiles: planning-and-status, platform-docs" in out
+    assert "semantic extraction still required" in out
+
+
+def test_main_update_alias_uses_run_flow(monkeypatch, tmp_path):
+    (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
+        "profiles": {
+            "platform-backend": {"kind": "code", "includes": ["src/**"], "excludes": []},
+        }
+    }))
+    captured = []
+
+    def fake_rebuild_code(path, *, follow_symlinks=False, profile=None, write_html=True, write_graphml=False):
+        captured.append(profile)
+        return True
+
+    monkeypatch.setattr("graphify.watch._rebuild_code", fake_rebuild_code)
+    monkeypatch.setattr(sys, "argv", ["graphify", "update", "code", str(tmp_path)])
+
+    main()
+
+    assert captured == ["platform-backend"]
+
+
 def test_main_prepare_profile_requires_profile(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["graphify", "prepare-profile"])
 
