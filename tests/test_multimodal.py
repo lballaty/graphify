@@ -22,6 +22,9 @@ def test_prepare_profile_run_writes_state_and_prompts(tmp_path):
     state_dir = tmp_path / "graphify-out" / "docs" / ".graphify-state"
     assert result["needs_semantic_extraction"] is True
     assert state_dir.exists()
+    assert (state_dir / "semantic-prompts" / "chunk-001.txt").exists()
+    assert (state_dir / "semantic-prompts" / "chunk-001.json").exists()
+    assert (state_dir / "semantic-results").exists()
     prompts = json.loads((state_dir / "semantic-prompts.json").read_text())
     assert len(prompts) == 1
     assert "chunk 1 of 1" in prompts[0]["prompt"]
@@ -157,6 +160,71 @@ def test_finalize_profile_run_accepts_directory_of_batch_results(tmp_path):
     assert result["expected_chunks"] == 1
     assert result["completed_chunks"] == 1
     assert result["failed_chunks"] == 0
+
+
+def test_finalize_profile_run_defaults_to_standard_semantic_results_dir(tmp_path):
+    (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
+        "profiles": {
+            "docs": {
+                "includes": ["docs/**"],
+                "excludes": [],
+                "purpose": "Docs profile",
+            }
+        }
+    }))
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    doc = docs / "guide.md"
+    doc.write_text("# Guide\nDecision log\n")
+
+    prepare_profile_run(tmp_path, profile="docs")
+    results_dir = tmp_path / "graphify-out" / "docs" / ".graphify-state" / "semantic-results"
+    (results_dir / "chunk-001.json").write_text(json.dumps([
+        {
+            "nodes": [
+                {
+                    "id": "guide_concept",
+                    "label": "Guide Concept",
+                    "file_type": "document",
+                    "source_file": str(doc),
+                    "source_location": None,
+                }
+            ],
+            "edges": [],
+            "hyperedges": [],
+            "input_tokens": 5,
+            "output_tokens": 7,
+        }
+    ]))
+
+    result = finalize_profile_run(tmp_path, profile="docs", write_html=False)
+
+    assert result["profile_name"] == "docs"
+    assert result["completed_chunks"] == 1
+
+
+def test_finalize_profile_run_rejects_empty_default_results_dir(tmp_path):
+    (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
+        "profiles": {
+            "docs": {
+                "includes": ["docs/**"],
+                "excludes": [],
+                "purpose": "Docs profile",
+            }
+        }
+    }))
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "guide.md").write_text("# Guide\nDecision log\n")
+
+    prepare_profile_run(tmp_path, profile="docs")
+
+    try:
+        finalize_profile_run(tmp_path, profile="docs", write_html=False)
+    except ValueError as exc:
+        assert "No semantic result JSON files found" in str(exc)
+    else:
+        raise AssertionError("Expected finalize_profile_run to reject an empty default semantic-results dir")
 
 
 def test_finalize_profile_run_rejects_missing_chunks_without_allow_partial(tmp_path):

@@ -135,10 +135,13 @@ Recommended multi-profile flow:
 7. For multimodal-heavy profiles, prepare the profile-scoped run state and semantic prompt artifacts first:
    `graphify prepare-profile /path/to/repo --profile platform-docs --deep-mode`
    This writes `detection.json`, `ast.json`, semantic cache/chunk state, and `semantic-prompts.json` under `graphify-out/<profile>/.graphify-state/`.
+   It also writes per-chunk prompt files under `graphify-out/<profile>/.graphify-state/semantic-prompts/` and creates the default result-drop directory `graphify-out/<profile>/.graphify-state/semantic-results/`.
 8. After semantic extraction results are available, finalize the prepared profile run:
    `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-semantic.json`
    or point at a directory of batch-result JSON files:
    `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-batches`
+   If you placed JSON batch results into the default `semantic-results/` directory, `--semantic` can be omitted:
+   `graphify finalize-profile /path/to/repo --profile platform-docs`
    The semantic input can be one merged payload, a list of chunk payloads, or a directory of JSON batch files.
 9. If some semantic batches timed out or failed, you can still finalize with the original Graphify failure policy:
    `graphify finalize-profile /path/to/repo --profile platform-docs --semantic /tmp/platform-docs-batches --allow-partial --max-failed-chunks 2`
@@ -399,6 +402,11 @@ Named profile rebuilds now support two paths:
 - `graphify rebuild-code PATH --profile NAME` for the fast code-only rebuild flow
 - `graphify prepare-profile ...` + `graphify finalize-profile ...` for docs, papers, images, and mixed multimodal profiles
 - `graphify run code|docs|all PATH` and `graphify update code|docs|all PATH` as higher-level orchestration layers over those same low-level commands
+
+For multimodal grouped runs, Graphify now standardizes the handoff directories under `graphify-out/<profile>/.graphify-state/`:
+- `semantic-prompts/` contains one prompt file and one metadata JSON per chunk
+- `semantic-results/` is the default place to drop one JSON file per completed chunk
+- `graphify finalize-profile` will use that default results directory automatically when `--semantic` is omitted
 
 The multimodal path reuses Graphify's original extraction model: profile filtering happens first, then Graphify runs the same structural and semantic extraction stages on the filtered corpus instead of inventing a separate profile-specific graph model.
 

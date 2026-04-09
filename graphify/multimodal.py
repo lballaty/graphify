@@ -6,6 +6,8 @@ from pathlib import Path
 
 
 STATE_DIR_NAME = ".graphify-state"
+SEMANTIC_PROMPTS_DIR_NAME = "semantic-prompts"
+SEMANTIC_RESULTS_DIR_NAME = "semantic-results"
 
 
 def _output_dir_for_profile(root: Path, profile: str | None) -> Path:
@@ -14,6 +16,14 @@ def _output_dir_for_profile(root: Path, profile: str | None) -> Path:
 
 def _state_dir_for_profile(root: Path, profile: str | None) -> Path:
     return _output_dir_for_profile(root, profile) / STATE_DIR_NAME
+
+
+def _semantic_prompts_dir_for_profile(root: Path, profile: str | None) -> Path:
+    return _state_dir_for_profile(root, profile) / SEMANTIC_PROMPTS_DIR_NAME
+
+
+def _semantic_results_dir_for_profile(root: Path, profile: str | None) -> Path:
+    return _state_dir_for_profile(root, profile) / SEMANTIC_RESULTS_DIR_NAME
 
 
 def prepare_profile_run(
@@ -56,7 +66,11 @@ def prepare_profile_run(
 
     output_dir = _output_dir_for_profile(root_path, prepared["profile_name"])
     state_dir = _state_dir_for_profile(root_path, prepared["profile_name"])
+    prompts_dir = _semantic_prompts_dir_for_profile(root_path, prepared["profile_name"])
+    results_dir = _semantic_results_dir_for_profile(root_path, prepared["profile_name"])
     state_dir.mkdir(parents=True, exist_ok=True)
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
 
     detection_path = state_dir / "detection.json"
     ast_path = state_dir / "ast.json"
@@ -68,6 +82,12 @@ def prepare_profile_run(
     ast_path.write_text(json.dumps(ast, indent=2) + "\n", encoding="utf-8")
     semantic_path.write_text(json.dumps(semantic, indent=2) + "\n", encoding="utf-8")
     prompts_path.write_text(json.dumps(prompts, indent=2) + "\n", encoding="utf-8")
+    for prompt in prompts:
+        chunk_num = int(prompt["chunk_num"])
+        prompt_file = prompts_dir / f"chunk-{chunk_num:03d}.txt"
+        metadata_file = prompts_dir / f"chunk-{chunk_num:03d}.json"
+        prompt_file.write_text(prompt["prompt"] + "\n", encoding="utf-8")
+        metadata_file.write_text(json.dumps(prompt, indent=2) + "\n", encoding="utf-8")
     metadata = {
         "root": str(root_path),
         "profile_name": prepared["profile_name"],
@@ -77,6 +97,8 @@ def prepare_profile_run(
         "excludes": prepared["excludes"],
         "output_dir": str(output_dir),
         "state_dir": str(state_dir),
+        "prompts_dir": str(prompts_dir),
+        "results_dir": str(results_dir),
         "deep_mode": deep_mode,
         "chunk_size": chunk_size,
         "semantic_chunks": total_chunks,
@@ -89,6 +111,8 @@ def prepare_profile_run(
         "ast_path": ast_path,
         "semantic_prep_path": semantic_path,
         "prompts_path": prompts_path,
+        "prompts_dir": prompts_dir,
+        "results_dir": results_dir,
         "needs_semantic_extraction": bool(semantic["chunks"]),
     }
 
@@ -97,7 +121,7 @@ def finalize_profile_run(
     root: str | Path,
     *,
     profile: str | None = None,
-    semantic_results_path: str | Path,
+    semantic_results_path: str | Path | None = None,
     write_html: bool = True,
     write_graphml: bool = False,
     allow_partial: bool = False,
@@ -119,10 +143,18 @@ def finalize_profile_run(
     detection = json.loads((state_dir / "detection.json").read_text(encoding="utf-8"))
     ast = json.loads((state_dir / "ast.json").read_text(encoding="utf-8"))
 
-    semantic_input = Path(semantic_results_path)
-    if not semantic_input.is_absolute():
-        semantic_input = Path.cwd() / semantic_input
+    if semantic_results_path is None:
+        semantic_input = Path(metadata.get("results_dir") or _semantic_results_dir_for_profile(root_path, profile))
+    else:
+        semantic_input = Path(semantic_results_path)
+        if not semantic_input.is_absolute():
+            semantic_input = Path.cwd() / semantic_input
     if semantic_input.is_dir():
+        if not any(semantic_input.glob("*.json")):
+            raise ValueError(
+                f"No semantic result JSON files found in {semantic_input}. "
+                "Run semantic extraction first or pass --semantic PATH."
+            )
         chunk_results: list[dict] = []
         for path in sorted(semantic_input.glob("*.json")):
             raw = json.loads(path.read_text(encoding="utf-8"))

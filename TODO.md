@@ -22,6 +22,8 @@
 - Added profile kind metadata support (`code`, `docs`, `mixed`, `planning`)
 - Added high-level `graphify run <code|docs|all>` and `graphify update <code|docs|all>` commands
 - Updated repo-local `graphify-out/README.md` generation to document the higher-level run/update commands
+- Standardized multimodal state handoff directories under `.graphify-state/semantic-prompts/` and `.graphify-state/semantic-results/`
+- Made `finalize-profile` default to the standard `semantic-results/` directory when `--semantic` is omitted
 
 ## Next
 
@@ -92,6 +94,7 @@
   - keep `prepare-profile` / `finalize-profile` as low-level recovery/debugging tools
   - add a first-class orchestration path for semantic chunk dispatch, result collection, retries, timeout handling, and finalize
   - preserve original graphify extraction logic and assistant-driven semantic model rather than inventing a separate provider client by default
+  - now that prompt/result directories are standardized, teach the assistant skills to use them for end-to-end grouped docs/all refreshes without ad hoc temp paths
 - Make viewer generation and access part of the standard workflow
   - generate `graph.html` by default where feasible for both default and named outputs
   - keep `graph.graphml` optional

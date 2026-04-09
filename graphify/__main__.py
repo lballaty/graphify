@@ -382,10 +382,17 @@ def claude_uninstall(project_dir: Path | None = None) -> None:
     _uninstall_claude_hook(project_dir or Path("."))
 
 
-def _find_semantic_input_for_profile(semantic_root: str | Path | None, profile_name: str) -> Path | None:
+def _find_semantic_input_for_profile(
+    root_path: Path,
+    semantic_root: str | Path | None,
+    profile_name: str,
+) -> Path | None:
     """Resolve an optional per-profile semantic result path for high-level run/update commands."""
     if not semantic_root:
-        return None
+        from graphify.multimodal import _semantic_results_dir_for_profile
+
+        default_dir = _semantic_results_dir_for_profile(root_path.resolve(), profile_name)
+        return default_dir if default_dir.exists() and any(default_dir.glob("*.json")) else None
     root = Path(semantic_root)
     if root.is_dir():
         candidates = [
@@ -480,7 +487,7 @@ def _run_high_level(
             chunk_size=chunk_size,
             deep_mode=deep_mode,
         )
-        semantic_input = _find_semantic_input_for_profile(semantic_root, profile["name"])
+        semantic_input = _find_semantic_input_for_profile(root_path, semantic_root, profile["name"])
         if semantic_input is not None:
             finalized = finalize_profile_run(
                 root_path,
@@ -538,7 +545,8 @@ def main() -> None:
         print("    --follow-symlinks    include symlinked files during detect()")
         print("  finalize-profile [path]  finalize a prepared multimodal profile run from semantic JSON")
         print("    --profile NAME        required named profile to finalize")
-        print("    --semantic PATH       JSON file or directory containing semantic output or chunk results")
+        print("    --semantic PATH       optional JSON file or directory containing semantic output or chunk results")
+        print("                         defaults to graphify-out/<profile>/.graphify-state/semantic-results/")
         print("    --allow-partial       finalize even if some chunk results are missing")
         print("    --max-failed-chunks N maximum missing chunk results allowed with --allow-partial")
         print("    --graphml             also export graph.graphml")
@@ -967,6 +975,10 @@ def main() -> None:
         print(f"AST: {result['ast_path']}")
         print(f"Semantic prep: {result['semantic_prep_path']}")
         print(f"Prompts: {result['prompts_path']}")
+        if "prompts_dir" in result:
+            print(f"Prompt files: {result['prompts_dir']}")
+        if "results_dir" in result:
+            print(f"Semantic results dir: {result['results_dir']}")
         if result["needs_semantic_extraction"]:
             print("Semantic extraction is required before finalizing this profile.")
         else:
@@ -1014,16 +1026,16 @@ def main() -> None:
                 i += 1
             elif arg.startswith("-"):
                 print(
-                    "Usage: graphify finalize-profile [path] --profile NAME --semantic PATH [--allow-partial] [--max-failed-chunks N] [--graphml] [--no-html]",
+                    "Usage: graphify finalize-profile [path] --profile NAME [--semantic PATH] [--allow-partial] [--max-failed-chunks N] [--graphml] [--no-html]",
                     file=sys.stderr,
                 )
                 sys.exit(1)
             else:
                 path = Path(arg)
                 i += 1
-        if not profile or not semantic:
+        if not profile:
             print(
-                "Usage: graphify finalize-profile [path] --profile NAME --semantic PATH [--allow-partial] [--max-failed-chunks N] [--graphml] [--no-html]",
+                "Usage: graphify finalize-profile [path] --profile NAME [--semantic PATH] [--allow-partial] [--max-failed-chunks N] [--graphml] [--no-html]",
                 file=sys.stderr,
             )
             sys.exit(1)

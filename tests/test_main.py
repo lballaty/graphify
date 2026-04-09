@@ -325,6 +325,60 @@ def test_main_run_docs_prepares_multimodal_profiles(monkeypatch, tmp_path, capsy
     assert "semantic extraction still required" in out
 
 
+def test_main_run_docs_auto_finalizes_from_default_results_dir(monkeypatch, tmp_path, capsys):
+    (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
+        "profiles": {
+            "platform-docs": {"kind": "docs", "includes": ["docs/**"], "excludes": []},
+        }
+    }))
+    prepared = []
+    finalized = []
+
+    def fake_prepare(path, *, profile=None, follow_symlinks=False, chunk_size=22, deep_mode=False):
+        prepared.append(profile)
+        results_dir = tmp_path / "graphify-out" / profile / ".graphify-state" / "semantic-results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        (results_dir / "chunk-001.json").write_text("[]")
+        return {
+            "metadata": {"profile_name": profile},
+            "detection_path": tmp_path / "detection.json",
+            "ast_path": tmp_path / "ast.json",
+            "semantic_prep_path": tmp_path / "semantic-prep.json",
+            "prompts_path": tmp_path / f"{profile}-prompts.json",
+            "prompts_dir": tmp_path / "prompts",
+            "results_dir": results_dir,
+            "needs_semantic_extraction": True,
+        }
+
+    def fake_finalize(
+        path,
+        *,
+        profile=None,
+        semantic_results_path=None,
+        write_html=True,
+        write_graphml=False,
+        allow_partial=False,
+        max_failed_chunks=None,
+    ):
+        finalized.append((profile, Path(semantic_results_path)))
+        return {
+            "profile_name": profile,
+            "graph_nodes": 1,
+            "graph_edges": 0,
+            "communities": 1,
+        }
+
+    monkeypatch.setattr("graphify.multimodal.prepare_profile_run", fake_prepare)
+    monkeypatch.setattr("graphify.multimodal.finalize_profile_run", fake_finalize)
+    monkeypatch.setattr(sys, "argv", ["graphify", "run", "docs", str(tmp_path)])
+
+    main()
+
+    assert prepared == ["platform-docs"]
+    assert finalized == [("platform-docs", tmp_path / "graphify-out" / "platform-docs" / ".graphify-state" / "semantic-results")]
+    assert "Finalized profile platform-docs" in capsys.readouterr().out
+
+
 def test_main_update_alias_uses_run_flow(monkeypatch, tmp_path):
     (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
         "profiles": {
@@ -388,10 +442,38 @@ def test_main_prepare_profile_invokes_runner(monkeypatch, tmp_path):
 
 
 def test_main_finalize_profile_requires_semantic(monkeypatch):
+    captured = {}
+
+    def fake_finalize(
+        path,
+        *,
+        profile=None,
+        semantic_results_path=None,
+        write_html=True,
+        write_graphml=False,
+        allow_partial=False,
+        max_failed_chunks=None,
+    ):
+        captured["profile"] = profile
+        captured["semantic_results_path"] = semantic_results_path
+        return {
+            "profile_name": profile,
+            "graph_nodes": 0,
+            "graph_edges": 0,
+            "communities": 0,
+            "expected_chunks": 0,
+            "completed_chunks": 0,
+            "failed_chunks": 0,
+            "output_dir": Path("."),
+        }
+
+    monkeypatch.setattr("graphify.multimodal.finalize_profile_run", fake_finalize)
     monkeypatch.setattr(sys, "argv", ["graphify", "finalize-profile", "--profile", "docs"])
 
-    with pytest.raises(SystemExit, match="1"):
-        main()
+    main()
+
+    assert captured["profile"] == "docs"
+    assert captured["semantic_results_path"] is None
 
 
 def test_main_finalize_profile_invokes_runner(monkeypatch, tmp_path):
