@@ -144,7 +144,9 @@ Rules:
 - If graphify-out/index.json exists, read it first to locate the current default graph output
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, refresh the graph with `graphify rebuild-code .`; if you are using named profiles, rerun `graphify rebuild-code . --profile <name>` for the relevant graph view
+- After modifying code files in this session, prefer `graphify run code .` to refresh saved code-oriented profiles
+- If docs, papers, or planning material changed, use `graphify run docs .` to prepare saved multimodal profiles; if semantic result files already exist, pass `--semantic PATH`
+- Use `graphify run all .` when you want a full grouped refresh across saved profile kinds
 """
 
 _CLAUDE_MD_MARKER = "## graphify"
@@ -160,7 +162,9 @@ Rules:
 - If graphify-out/index.json exists, read it first to locate the current default graph output
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, refresh the graph with `graphify rebuild-code .`; if you are using named profiles, rerun `graphify rebuild-code . --profile <name>` for the relevant graph view
+- After modifying code files in this session, prefer `graphify run code .` to refresh saved code-oriented profiles
+- If docs, papers, or planning material changed, use `graphify run docs .` to prepare saved multimodal profiles; if semantic result files already exist, pass `--semantic PATH`
+- Use `graphify run all .` when you want a full grouped refresh across saved profile kinds
 """
 
 _AGENTS_MD_MARKER = "## graphify"

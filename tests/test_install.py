@@ -103,6 +103,7 @@ def test_codex_agents_install_writes_agents_md(tmp_path):
     assert agents_md.exists()
     assert "graphify" in agents_md.read_text()
     assert "GRAPH_REPORT.md" in agents_md.read_text()
+    assert "graphify run code ." in agents_md.read_text()
 
 
 def test_opencode_agents_install_writes_agents_md(tmp_path):
