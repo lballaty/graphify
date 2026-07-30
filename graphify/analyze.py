@@ -110,7 +110,7 @@ def _is_concept_node(G: nx.Graph, node_id: str) -> bool:
 
 
 _CODE_EXTENSIONS = {"py", "ts", "tsx", "js", "go", "rs", "java", "rb", "cpp", "c", "h", "cs", "kt", "scala", "php"}
-_DOC_EXTENSIONS = {"md", "txt", "rst"}
+_DOC_EXTENSIONS = {"md", "mdx", "txt", "rst"}
 _PAPER_EXTENSIONS = {"pdf"}
 _IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif", "svg"}
 
