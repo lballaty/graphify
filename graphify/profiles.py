@@ -16,7 +16,6 @@ _DOC_HINTS = (
     "documentation",
     "wiki",
     "readme",
-    "architecture",
     "guide",
     "manual",
     "spec",
@@ -38,6 +37,11 @@ _PLANNING_HINTS = (
     "active-projects",
 )
 _CODE_HINTS = (
+    "config",
+    "core",
+    "platform",
+    "enterprise",
+    "runtime",
     "src",
     "backend",
     "frontend",
@@ -60,6 +64,14 @@ _CODE_HINTS = (
     "scripts",
     "test",
     "tests",
+    "train",
+    "training",
+    "model",
+    "models",
+    "rating",
+    "ratings",
+    "util",
+    "utils",
 )
 
 
@@ -71,23 +83,39 @@ def infer_graph_profile_kind(
     purpose: str | None = None,
 ) -> str:
     """Infer a profile kind when the config does not declare one explicitly."""
-    haystack = " ".join(
-        [name, purpose or "", *(includes or []), *(excludes or [])]
-    ).lower()
+    include_haystack = " ".join(includes or []).lower()
+    fallback_haystack = " ".join([name, purpose or ""]).lower()
 
-    planning_hits = sum(token in haystack for token in _PLANNING_HINTS)
-    doc_hits = sum(token in haystack for token in _DOC_HINTS)
-    code_hits = sum(token in haystack for token in _CODE_HINTS)
+    include_planning_hits = sum(token in include_haystack for token in _PLANNING_HINTS)
+    include_doc_hits = sum(token in include_haystack for token in _DOC_HINTS)
+    include_code_hits = sum(token in include_haystack for token in _CODE_HINTS)
 
-    if planning_hits:
+    if include_code_hits and not include_doc_hits and not include_planning_hits:
+        return "code"
+    if include_planning_hits and not include_code_hits and not include_doc_hits:
         return "planning"
-    if doc_hits and code_hits:
-        return "mixed"
-    if doc_hits:
+    if include_doc_hits and not include_code_hits and not include_planning_hits:
         return "docs"
-    if "full-first-party" in haystack or "cross-runtime" in haystack or "broad first-party" in haystack:
+    if include_code_hits and (include_doc_hits or include_planning_hits):
         return "mixed"
-    if "content-and-training" in haystack:
+    if include_doc_hits and include_planning_hits:
+        return "mixed"
+
+    fallback_planning_hits = sum(token in fallback_haystack for token in _PLANNING_HINTS)
+    fallback_doc_hits = sum(token in fallback_haystack for token in _DOC_HINTS)
+    fallback_code_hits = sum(token in fallback_haystack for token in _CODE_HINTS)
+
+    if fallback_code_hits and not fallback_doc_hits and not fallback_planning_hits:
+        return "code"
+    if fallback_planning_hits and not fallback_code_hits and not fallback_doc_hits:
+        return "planning"
+    if fallback_doc_hits and not fallback_code_hits and not fallback_planning_hits:
+        return "docs"
+    if fallback_doc_hits and fallback_code_hits:
+        return "mixed"
+    if "full-first-party" in fallback_haystack or "cross-runtime" in fallback_haystack or "broad first-party" in fallback_haystack:
+        return "mixed"
+    if "content-and-training" in fallback_haystack:
         return "mixed"
     return "code"
 

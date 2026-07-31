@@ -77,6 +77,24 @@ def test_infer_graph_profile_kind_defaults_to_code():
     ) == "code"
 
 
+def test_infer_graph_profile_kind_ignores_exclude_only_planning_noise():
+    assert infer_graph_profile_kind(
+        "core",
+        includes=["config/**", "enterprise/**", "platform/**", "ratings/**", "tests/**", "utils/**", "*.js"],
+        excludes=["models/**", "training/**", "reports/**"],
+        purpose="Main runtime, application, and operational architecture excluding training-oriented subsystems.",
+    ) == "code"
+
+
+def test_infer_graph_profile_kind_marks_training_code_profile_as_code():
+    assert infer_graph_profile_kind(
+        "training",
+        includes=["models/**", "training/**", "config/**", "utils/**"],
+        excludes=["reports/**"],
+        purpose="Training, model-building, dataset, and adaptation workflows.",
+    ) == "code"
+
+
 def test_list_profiles_for_run_filters_by_kind(tmp_path):
     (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
         "profiles": {
@@ -103,3 +121,31 @@ def test_list_profiles_for_run_filters_by_kind(tmp_path):
         "planning-and-status",
         "platform-docs",
     ]
+
+
+def test_load_graph_profiles_infers_code_kinds_for_llm_test_suite_style_profiles(tmp_path):
+    (tmp_path / ".graphifyprofiles.json").write_text(json.dumps({
+        "profiles": {
+            "core": {
+                "includes": ["config/**", "enterprise/**", "platform/**", "ratings/**", "tests/**", "utils/**", "*.js"],
+                "excludes": ["models/**", "training/**", "reports/**"],
+                "purpose": "Main runtime, application, and operational architecture excluding training-oriented subsystems.",
+            },
+            "training": {
+                "includes": ["models/**", "training/**", "config/**", "utils/**"],
+                "excludes": ["reports/**"],
+                "purpose": "Training, model-building, dataset, and adaptation workflows.",
+            },
+            "full-first-party": {
+                "includes": ["config/**", "enterprise/**", "models/**", "platform/**", "ratings/**", "tests/**", "training/**", "utils/**", "*.js"],
+                "excludes": ["reports/**"],
+                "purpose": "Broad first-party repository map across runtime and training subsystems.",
+            },
+        }
+    }))
+
+    profiles = load_graph_profiles(tmp_path)
+
+    assert profiles["core"]["kind"] == "code"
+    assert profiles["training"]["kind"] == "code"
+    assert profiles["full-first-party"]["kind"] == "code"
