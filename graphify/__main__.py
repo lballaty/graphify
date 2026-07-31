@@ -511,6 +511,11 @@ def _run_high_level(
 
 
 def main() -> None:
+    if len(sys.argv) >= 2 and sys.argv[1] in ("--version", "-V", "version"):
+        import graphify
+        print(f"graphify {graphify.__version__} ({__file__})")
+        return
+
     # Check all known skill install locations for a stale version stamp
     for cfg in _PLATFORM_CONFIG.values():
         skill_dst = Path.home() / cfg["skill_dst"]
