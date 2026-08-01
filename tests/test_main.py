@@ -79,10 +79,13 @@ def test_main_discover_profiles_prints_existing_state(tmp_path, monkeypatch, cap
 
     main()
 
-    out = capsys.readouterr().out
-    assert "Found existing saved profiles" in out
-    assert "Found existing indexed outputs" in out
-    assert "force a full rediscovery" in out
+    captured = capsys.readouterr()
+    # Human guidance goes to stderr; stdout must stay clean JSON for machine
+    # consumers (aidevops parses discover-profiles stdout as a single object).
+    assert "Found existing saved profiles" in captured.err
+    assert "Found existing indexed outputs" in captured.err
+    assert "force a full rediscovery" in captured.err
+    json.loads(captured.out)  # stdout is exactly one valid JSON object
 
 
 def test_main_discover_profiles_uses_saved_profiles_as_primary_output(tmp_path, monkeypatch, capsys):

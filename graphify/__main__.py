@@ -21,7 +21,10 @@ def _check_skill_version(skill_dst: Path) -> None:
         return
     installed = version_file.read_text(encoding="utf-8").strip()
     if installed != __version__:
-        print(f"  warning: skill is from graphify {installed}, package is {__version__}. Run 'graphify install' to update.")
+        print(
+            f"  warning: skill is from graphify {installed}, package is {__version__}. Run 'graphify install' to update.",
+            file=sys.stderr,
+        )
 
 _SETTINGS_HOOK = {
     "matcher": "Glob|Grep",
@@ -693,18 +696,23 @@ def main() -> None:
         if state.get("profiles_path"):
             print(
                 f"\nFound existing saved profiles at {state['profiles_path']}: "
-                f"{', '.join(state.get('profile_names', [])) or '(none)'}"
+                f"{', '.join(state.get('profile_names', [])) or '(none)'}",
+                file=sys.stderr,
             )
         if state.get("index_path"):
             print(
                 f"Found existing indexed outputs at {state['index_path']}: "
-                f"{', '.join(state.get('indexed_graph_names', [])) or '(none)'}"
+                f"{', '.join(state.get('indexed_graph_names', [])) or '(none)'}",
+                file=sys.stderr,
             )
         if state.get("profiles_path") or state.get("index_path"):
-            print("Remove the existing profile file and graphify-out/ outputs to force a full rediscovery.")
+            print(
+                "Remove the existing profile file and graphify-out/ outputs to force a full rediscovery.",
+                file=sys.stderr,
+            )
         if write_profiles:
             target = save_discovered_profiles(proposal, root=path)
-            print(f"\nSaved profile proposal to {target}")
+            print(f"\nSaved profile proposal to {target}", file=sys.stderr)
     elif cmd == "build-profiles":
         from graphify.discover import apply_profile_renames, discover_profiles, save_discovered_profiles
         from graphify.profiles import load_graph_profiles
