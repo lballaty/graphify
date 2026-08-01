@@ -24,9 +24,23 @@ def generate(
     inf_pct = round(confidences.count("INFERRED") / total * 100)
     amb_pct = round(confidences.count("AMBIGUOUS") / total * 100)
 
+    # INFERRED edges come from two very different sources with different
+    # reliability: AST call resolution (name-matched, no confidence_score) and
+    # LLM semantic reasoning (carries a confidence_score). Report them apart so
+    # the top-line "avg confidence" is not diluted by unscored structural edges.
     inf_edges = [(u, v, d) for u, v, d in G.edges(data=True) if d.get("confidence") == "INFERRED"]
-    inf_scores = [d.get("confidence_score", 0.5) for _, _, d in inf_edges]
-    inf_avg = round(sum(inf_scores) / len(inf_scores), 2) if inf_scores else None
+    inf_structural = [e for e in inf_edges if e[2].get("confidence_score") is None]
+    inf_semantic = [e for e in inf_edges if e[2].get("confidence_score") is not None]
+    sem_scores = [e[2]["confidence_score"] for e in inf_semantic]
+    sem_avg = round(sum(sem_scores) / len(sem_scores), 2) if sem_scores else None
+    inf_detail = ""
+    if inf_edges:
+        inf_detail = (
+            f" · INFERRED: {len(inf_edges)} edges"
+            f" [{len(inf_structural)} structural (AST name-match), {len(inf_semantic)} semantic (LLM)]"
+        )
+        if sem_avg is not None:
+            inf_detail += f" · semantic avg confidence: {sem_avg}"
 
     lines = [
         f"# Graph Report - {root}  ({today})",
@@ -46,7 +60,7 @@ def generate(
         "## Summary",
         f"- {G.number_of_nodes()} nodes · {G.number_of_edges()} edges · {len(communities)} communities detected",
         f"- Extraction: {ext_pct}% EXTRACTED · {inf_pct}% INFERRED · {amb_pct}% AMBIGUOUS"
-        + (f" · INFERRED: {len(inf_edges)} edges (avg confidence: {inf_avg})" if inf_avg is not None else ""),
+        + inf_detail,
         f"- Token cost: {token_cost.get('input', 0):,} input · {token_cost.get('output', 0):,} output",
         "",
         "## God Nodes (most connected - your core abstractions)",

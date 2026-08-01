@@ -1,6 +1,7 @@
 # MCP stdio server - exposes graph query tools to Claude and other agents
 from __future__ import annotations
 import json
+import re
 import sys
 from pathlib import Path
 import networkx as nx
@@ -37,15 +38,49 @@ def _communities_from_graph(G: nx.Graph) -> dict[int, list[str]]:
     return communities
 
 
+# Split identifiers/labels/queries into word tokens: handles snake_case, dots,
+# spaces, and camelCase so `getUserID` -> [get, user, id], `parse_html` -> [parse, html].
+_WORD_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+")
+
+# Confidence ordering: EXTRACTED (observed) is most trustworthy, AMBIGUOUS least.
+_CONF_RANK = {"EXTRACTED": 0, "INFERRED": 1, "AMBIGUOUS": 2}
+
+
+def _tokenize(text: str) -> list[str]:
+    """Return lowercase word tokens from an identifier, label, or query string."""
+    return [m.group(0).lower() for m in _WORD_RE.finditer(text or "")]
+
+
 def _score_nodes(G: nx.Graph, terms: list[str]) -> list[tuple[float, str]]:
-    scored = []
+    """Rank nodes for a query.
+
+    Combines word-aware relevance (exact token match beats substring) with an
+    importance boost by node degree, so core abstractions (god nodes) surface
+    ahead of trivial leaves that merely share a term. Ordering is deterministic.
+    """
+    term_set = {t for t in terms if t}
+    if not term_set:
+        return []
+    degrees = dict(G.degree())
+    max_deg = max(degrees.values()) if degrees else 1
+    scored: list[tuple[float, str]] = []
     for nid, data in G.nodes(data=True):
-        label = data.get("label", "").lower()
-        source = data.get("source_file", "").lower()
-        score = sum(1 for t in terms if t in label) + sum(0.5 for t in terms if t in source)
-        if score > 0:
-            scored.append((score, nid))
-    return sorted(scored, reverse=True)
+        label = data.get("label", "")
+        label_lower = label.lower()
+        label_tokens = set(_tokenize(label))
+        source_lower = data.get("source_file", "").lower()
+        exact = sum(1 for t in term_set if t in label_tokens)
+        substr = sum(1 for t in term_set if t not in label_tokens and t in label_lower)
+        src = sum(1 for t in term_set if t in source_lower)
+        score = exact * 2.0 + substr * 0.5 + src * 0.25
+        if score <= 0:
+            continue
+        # Importance boost: hubs are more likely the concept the caller wants.
+        score *= 1.0 + degrees.get(nid, 0) / (max_deg or 1)
+        scored.append((score, nid))
+    # score desc, then degree desc, then id for stable ties.
+    scored.sort(key=lambda s: (-s[0], -degrees.get(s[1], 0), s[1]))
+    return scored
 
 
 def _bfs(G: nx.Graph, start_nodes: list[str], depth: int) -> tuple[set[str], list[tuple]]:
@@ -81,18 +116,33 @@ def _dfs(G: nx.Graph, start_nodes: list[str], depth: int) -> tuple[set[str], lis
 
 
 def _subgraph_to_text(G: nx.Graph, nodes: set[str], edges: list[tuple], token_budget: int = 2000) -> str:
-    """Render subgraph as text, cutting at token_budget (approx 3 chars/token)."""
+    """Render subgraph as text, cutting at token_budget (approx 3 chars/token).
+
+    Edges are ordered most-trustworthy first (EXTRACTED before INFERRED before
+    AMBIGUOUS, higher weight first) so budget truncation drops low-confidence
+    noise rather than observed facts.
+    """
     char_budget = token_budget * 3
     lines = []
     for nid in sorted(nodes, key=lambda n: G.degree(n), reverse=True):
         d = G.nodes[nid]
         line = f"NODE {sanitize_label(d.get('label', nid))} [src={d.get('source_file', '')} loc={d.get('source_location', '')} community={d.get('community', '')}]"
         lines.append(line)
-    for u, v in edges:
-        if u in nodes and v in nodes:
-            d = G.edges[u, v]
-            line = f"EDGE {sanitize_label(G.nodes[u].get('label', u))} --{d.get('relation', '')} [{d.get('confidence', '')}]--> {sanitize_label(G.nodes[v].get('label', v))}"
-            lines.append(line)
+
+    def _edge_rank(uv: tuple) -> tuple:
+        d = G.edges[uv[0], uv[1]]
+        conf = d.get("confidence", "EXTRACTED")
+        try:
+            weight = float(d.get("weight", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            weight = 1.0
+        return (_CONF_RANK.get(conf, 1), -weight)
+
+    visible = [(u, v) for u, v in edges if u in nodes and v in nodes]
+    for u, v in sorted(visible, key=_edge_rank):
+        d = G.edges[u, v]
+        line = f"EDGE {sanitize_label(G.nodes[u].get('label', u))} --{d.get('relation', '')} [{d.get('confidence', '')}]--> {sanitize_label(G.nodes[v].get('label', v))}"
+        lines.append(line)
     output = "\n".join(lines)
     if len(output) > char_budget:
         output = output[:char_budget] + f"\n... (truncated to ~{token_budget} token budget)"
@@ -100,10 +150,25 @@ def _subgraph_to_text(G: nx.Graph, nodes: set[str], edges: list[tuple], token_bu
 
 
 def _find_node(G: nx.Graph, label: str) -> list[str]:
-    """Return node IDs whose label or ID matches the search term (case-insensitive)."""
+    """Return node IDs matching the term, best match first.
+
+    Exact id/label match ranks first, then shared word tokens, then substring;
+    degree breaks ties toward the more central node.
+    """
     term = label.lower()
-    return [nid for nid, d in G.nodes(data=True)
-            if term in d.get("label", "").lower() or term == nid.lower()]
+    term_tokens = set(_tokenize(label))
+    scored: list[tuple[float, str]] = []
+    for nid, d in G.nodes(data=True):
+        lab_lower = d.get("label", "").lower()
+        if term == nid.lower() or term == lab_lower:
+            scored.append((1000.0 + G.degree(nid), nid))
+            continue
+        exact = len(term_tokens & set(_tokenize(d.get("label", ""))))
+        substr = 1 if term and term in lab_lower else 0
+        if exact or substr:
+            scored.append((exact * 2.0 + substr * 0.5 + G.degree(nid) / 1000.0, nid))
+    scored.sort(key=lambda s: (-s[0], s[1]))
+    return [nid for _, nid in scored]
 
 
 def serve(graph_path: str | None = None) -> None:
@@ -198,7 +263,7 @@ def serve(graph_path: str | None = None) -> None:
         mode = arguments.get("mode", "bfs")
         depth = min(int(arguments.get("depth", 3)), 6)
         budget = int(arguments.get("token_budget", 2000))
-        terms = [t.lower() for t in question.split() if len(t) > 2]
+        terms = _tokenize(question)
         scored = _score_nodes(G, terms)
         start_nodes = [nid for _, nid in scored[:3]]
         if not start_nodes:
@@ -208,12 +273,11 @@ def serve(graph_path: str | None = None) -> None:
         return header + _subgraph_to_text(G, nodes, edges, budget)
 
     def _tool_get_node(arguments: dict) -> str:
-        label = arguments["label"].lower()
-        matches = [(nid, d) for nid, d in G.nodes(data=True)
-                   if label in d.get("label", "").lower() or label == nid.lower()]
+        matches = _find_node(G, arguments["label"])
         if not matches:
-            return f"No node matching '{label}' found."
-        nid, d = matches[0]
+            return f"No node matching '{arguments['label']}' found."
+        nid = matches[0]
+        d = G.nodes[nid]
         return "\n".join([
             f"Node: {d.get('label', nid)}",
             f"  ID: {nid}",
@@ -270,8 +334,8 @@ def serve(graph_path: str | None = None) -> None:
         )
 
     def _tool_shortest_path(arguments: dict) -> str:
-        src_scored = _score_nodes(G, [t.lower() for t in arguments["source"].split()])
-        tgt_scored = _score_nodes(G, [t.lower() for t in arguments["target"].split()])
+        src_scored = _score_nodes(G, _tokenize(arguments["source"]))
+        tgt_scored = _score_nodes(G, _tokenize(arguments["target"]))
         if not src_scored:
             return f"No node matching source '{arguments['source']}' found."
         if not tgt_scored:

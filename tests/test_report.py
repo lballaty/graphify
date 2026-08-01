@@ -61,3 +61,22 @@ def test_report_shows_raw_cohesion_scores():
     assert "Cohesion:" in report
     assert "✓" not in report
     assert "⚠" not in report
+
+
+def test_report_splits_inferred_structural_and_semantic():
+    import networkx as nx
+    G = nx.Graph()
+    for n in ("a", "b", "c"):
+        G.add_node(n, label=n, community=0)
+    # structural (AST name-match): no confidence_score
+    G.add_edge("a", "b", relation="calls", confidence="INFERRED", weight=0.8)
+    # semantic (LLM): carries a confidence_score
+    G.add_edge("b", "c", relation="relates_to", confidence="INFERRED", confidence_score=0.9)
+    detection = {"total_files": 1, "total_words": 100, "warning": None}
+    report = generate(
+        G, {0: ["a", "b", "c"]}, {0: 0.5}, {0: "C0"}, [], [],
+        detection, {"input": 0, "output": 0}, "./project",
+    )
+    assert "1 structural (AST name-match)" in report
+    assert "1 semantic (LLM)" in report
+    assert "semantic avg confidence: 0.9" in report

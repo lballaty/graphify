@@ -11,6 +11,8 @@ from graphify.serve import (
     _dfs,
     _subgraph_to_text,
     _load_graph,
+    _tokenize,
+    _find_node,
 )
 
 
@@ -148,6 +150,72 @@ def test_load_graph_roundtrip(tmp_path):
         G2 = _load_graph(str(p))
     assert G2.number_of_nodes() == G.number_of_nodes()
     assert G2.number_of_edges() == G.number_of_edges()
+
+
+# --- _tokenize ---
+
+def test_tokenize_camelcase():
+    assert _tokenize("getUserID") == ["get", "user", "id"]
+
+def test_tokenize_snake_and_dots():
+    assert _tokenize("parse_html.node") == ["parse", "html", "node"]
+
+def test_tokenize_empty():
+    assert _tokenize("") == []
+
+
+# --- _score_nodes: importance + word-aware ---
+
+def test_score_nodes_importance_boost_ranks_hub_first():
+    # Two nodes match "client" equally on the term; the higher-degree hub wins.
+    G = nx.Graph()
+    G.add_node("hub", label="client", source_file="client.py")
+    G.add_node("leaf", label="clientHelper", source_file="helper.py")
+    for i in range(5):
+        G.add_node(f"x{i}", label=f"node{i}")
+        G.add_edge("hub", f"x{i}")
+    scored = _score_nodes(G, ["client"])
+    assert scored[0][1] == "hub"
+
+def test_score_nodes_camelcase_token_match():
+    G = nx.Graph()
+    G.add_node("n1", label="getUserId", source_file="a.py")
+    scored = _score_nodes(G, _tokenize("user"))
+    assert scored and scored[0][1] == "n1"
+
+def test_score_nodes_substring_fallback_still_matches():
+    # "ser" is a substring of "user" but not a word token; still a (weak) hit.
+    G = nx.Graph()
+    G.add_node("n1", label="user", source_file="a.py")
+    scored = _score_nodes(G, ["ser"])
+    assert scored and scored[0][1] == "n1"
+
+def test_score_nodes_empty_terms():
+    assert _score_nodes(_make_graph(), []) == []
+
+
+# --- _find_node: ranked ---
+
+def test_find_node_exact_before_token_match():
+    G = nx.Graph()
+    G.add_node("n1", label="client", source_file="a.py")
+    G.add_node("n2", label="asyncClient", source_file="b.py")
+    matches = _find_node(G, "client")
+    assert matches[0] == "n1"  # exact label match ranks ahead of token match
+
+
+# --- _subgraph_to_text: confidence ordering ---
+
+def test_subgraph_to_text_orders_extracted_before_inferred():
+    G = nx.Graph()
+    for n in ("a", "b", "c"):
+        G.add_node(n, label=n)
+    G.add_edge("a", "b", relation="calls", confidence="INFERRED")
+    G.add_edge("a", "c", relation="imports", confidence="EXTRACTED")
+    text = _subgraph_to_text(G, {"a", "b", "c"}, [("a", "b"), ("a", "c")])
+    edge_lines = [ln for ln in text.splitlines() if ln.startswith("EDGE")]
+    assert "EXTRACTED" in edge_lines[0]  # trustworthy edge rendered first
+    assert "INFERRED" in edge_lines[1]
 
 def test_load_graph_missing_file(tmp_path):
     graphify_dir = tmp_path / "graphify-out"

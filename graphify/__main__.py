@@ -1076,7 +1076,7 @@ def main() -> None:
             print("Usage: graphify query \"<question>\" [--dfs] [--budget N] [--graph path]", file=sys.stderr)
             sys.exit(1)
         from graphify.index import resolve_default_graph_path
-        from graphify.serve import _score_nodes, _bfs, _dfs, _subgraph_to_text
+        from graphify.serve import _score_nodes, _bfs, _dfs, _subgraph_to_text, _tokenize
         from graphify.security import sanitize_label
         from networkx.readwrite import json_graph
         question = sys.argv[2]
@@ -1126,7 +1126,7 @@ def main() -> None:
         except Exception as exc:
             print(f"error: could not load graph: {exc}", file=sys.stderr)
             sys.exit(1)
-        terms = [t.lower() for t in question.split() if len(t) > 2]
+        terms = _tokenize(question)
         scored = _score_nodes(G, terms)
         if not scored:
             print("No matching nodes found.")
