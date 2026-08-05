@@ -1,0 +1,227 @@
+# File: plans/plan-2026-08-01-graphify-search-accuracy.yaml
+# Description: Autonomous execution plan for graphify Tier 2 (fuzzy/robust search)
+#              and Tier 3 (scope-aware call resolution) accuracy improvements.
+# Author: Claude (planning session with Libor Ballaty)
+# Created: 2026-08-01
+#
+# EXECUTION NOTES (read before /execute-plan-autonomously):
+# - Implementation steps whose `command` begins with "IMPLEMENT:" are applied by the
+#   autonomous coding agent as code edits, per the exact spec in the command text.
+#   Their `validation` is a literal shell command that must pass afterward.
+# - Mechanical steps (git/pytest/pipx) have literal shell in `command`.
+# - Re-pinning makes code LIVE for all agents + the aidevops UI, so each tier is
+#   done on its own branch, gated by the full suite, merged --ff-only into v3,
+#   and only THEN re-pinned. WIP is never pinned.
+# - REPO = /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify
+# - All git commits are path-form, no Co-Authored-By trailers. Warnings to stderr.
+
+plan:
+  title: >
+    Ship Tier 2 (difflib fuzzy fallback + score normalization) and Tier 3
+    (scope-aware call resolution to cut false INFERRED 'calls' edges) to graphify,
+    autonomously, each tier branch-gated-merged-then-repinned.
+
+  goal_validation:
+    - "Full pytest suite green at every gate (baseline was 461; ends higher with new tests)."
+    - "graphify query with a misspelled term returns relevant candidates instead of 'No matching nodes found.'"
+    - "scripts/measure_call_edges.py reports fewer ambiguous-resolution 'calls' edges after Tier 3 than the captured baseline, with total real edges not collapsing (>= 90% of prior unambiguous edges retained)."
+    - "v3 contains both tiers, is pushed to origin/v3, and the pinned pipx install resolves to site-packages (not the working tree)."
+
+  steps:
+
+    # ---------------- PHASE A — TIER 2: robust query matching ----------------
+
+    - id: t2-branch
+      description: Create the Tier 2 feature branch off current v3.
+      command: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify checkout v3 && git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify checkout -b feature/search-accuracy-tier2
+      validation: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify rev-parse --abbrev-ref HEAD | grep -qx feature/search-accuracy-tier2
+      depends_on: []
+      fatal_on_failure: true
+
+    - id: t2-impl-fuzzy
+      description: Add a stdlib difflib fuzzy fallback so typo'd queries still return candidates.
+      command: >
+        IMPLEMENT: In graphify/serve.py add `import difflib`. Add helper
+        `_fuzzy_node_ids(G, terms, limit=5)` that builds a mapping of every node's
+        word tokens (via _tokenize) and label to its node id, then uses
+        difflib.get_close_matches (cutoff=0.75) on each query term against that
+        vocabulary to return up to `limit` node ids ranked by best ratio, breaking
+        ties by higher degree then id (deterministic). In `_tool_query_graph` and the
+        `graphify query` CLI path in graphify/__main__.py: when `_score_nodes` returns
+        an empty list, fall back to `_fuzzy_node_ids` for start-node selection and
+        prefix the output with a one-line note "(fuzzy match — no exact hits)" printed
+        into the returned TEXT payload for the CLI/MCP result (NOT to stderr, it is the
+        result body). Also give `_find_node` an identical difflib fallback when it finds
+        zero exact/token/substring matches. Do not change behavior when exact/substring
+        hits exist. Keep helpers in serve.py (match the repo's duplicate-friendly style).
+      validation: python3 -c "import graphify.serve as s; import networkx as nx; G=nx.Graph(); G.add_node('n1', label='extract', source_file='a.py'); print('OK' if s._fuzzy_node_ids(G, ['extrac']) == ['n1'] else 'FAIL')" | grep -qx OK
+      depends_on: [t2-branch]
+      fatal_on_failure: true
+
+    - id: t2-tests
+      description: Add tests covering fuzzy fallback, exact-preference, and empty-query safety.
+      command: >
+        IMPLEMENT: In tests/test_serve.py add: (1) test that a misspelled query term
+        ('extrac' for a node labeled 'extract') returns the node via _fuzzy_node_ids;
+        (2) test that when exact matches exist, _score_nodes results are used and fuzzy
+        is NOT invoked (assert exact node ranks first); (3) test _find_node returns a
+        fuzzy candidate for a near-miss label; (4) test _fuzzy_node_ids([]) == [] and
+        on an empty graph == []. Match existing test style (networkx graphs built inline).
+      validation: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m pytest tests/test_serve.py -q
+      depends_on: [t2-impl-fuzzy]
+      fatal_on_failure: true
+
+    - id: t2-gate
+      description: Run the full suite; Tier 2 must not regress any existing test.
+      command: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m pytest -q
+      validation: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m pytest -q >/dev/null 2>&1
+      depends_on: [t2-tests]
+      fatal_on_failure: true
+
+    - id: t2-stdout-clean
+      description: Confirm the query command keeps machine-readable stdout free of stderr warnings.
+      command: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m graphify query "extract" 2>/dev/null | head -1
+      validation: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && test "$(python3 -m graphify query 'zzzznotreal' 2>/dev/null | grep -c 'warning: skill')" = "0"
+      depends_on: [t2-gate]
+      fatal_on_failure: false
+
+    - id: t2-commit
+      description: Commit the Tier 2 changes path-form on the feature branch.
+      command: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify commit graphify/serve.py graphify/__main__.py tests/test_serve.py -m "feat: difflib fuzzy fallback for typo-tolerant agent search"
+      validation: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify log -1 --pretty=%s | grep -qi "fuzzy fallback"
+      depends_on: [t2-gate]
+      fatal_on_failure: true
+
+    - id: t2-merge
+      description: Fast-forward merge Tier 2 into v3 (our fork main).
+      command: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify checkout v3 && git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify merge --ff-only feature/search-accuracy-tier2
+      validation: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify branch --contains feature/search-accuracy-tier2 | grep -qx '* v3'
+      depends_on: [t2-commit]
+      fatal_on_failure: true
+
+    - id: t2-release
+      description: Push v3 to the fork and re-pin the CLI so agents/UI get Tier 2.
+      command: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify push origin v3 && pipx install --force /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify
+      validation: graphify --version | grep -q "site-packages"
+      depends_on: [t2-merge]
+      fatal_on_failure: false
+
+    # ---------------- PHASE B — TIER 3: scope-aware call resolution ----------------
+
+    - id: t3-branch
+      description: Create the Tier 3 feature branch off the now-updated v3.
+      command: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify checkout v3 && git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify checkout -b feature/search-accuracy-tier3
+      validation: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify rev-parse --abbrev-ref HEAD | grep -qx feature/search-accuracy-tier3
+      depends_on: [t2-merge]
+      fatal_on_failure: true
+
+    - id: t3-harness
+      description: Add a measurement script that quantifies ambiguous 'calls'-edge resolution over the fixture corpus.
+      command: >
+        IMPLEMENT: Create scripts/measure_call_edges.py (with a standard code header
+        comment). It imports graphify.extract.extract, runs it on every source file
+        under tests/fixtures/ (best-effort; skip files that raise), collects all edges
+        with relation=='calls' and confidence=='INFERRED', and for each computes whether
+        its target label is AMBIGUOUS — defined as: 2+ distinct nodes in the same
+        source_file share the target's (case-insensitive) label. It prints one JSON
+        object to stdout: {"total_call_edges": N, "ambiguous_call_edges": M,
+        "unambiguous_call_edges": N-M}. Diagnostics (which files were skipped) go to
+        stderr only. Deterministic output (sort inputs).
+      validation: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 scripts/measure_call_edges.py 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'ambiguous_call_edges' in d; print('OK')" | grep -qx OK
+      depends_on: [t3-branch]
+      fatal_on_failure: true
+
+    - id: t3-baseline
+      description: Capture the pre-change call-edge metric as the comparison baseline.
+      command: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 scripts/measure_call_edges.py 2>/dev/null > /tmp/gfx_calls_baseline.json
+      validation: python3 -c "import json; d=json.load(open('/tmp/gfx_calls_baseline.json')); assert d['total_call_edges'] >= 0; print('OK')" | grep -qx OK
+      depends_on: [t3-harness]
+      fatal_on_failure: true
+
+    - id: t3-core-resolver
+      description: Add a shared scope-aware call resolver and wire the generic walker to it.
+      command: >
+        IMPLEMENT: In graphify/extract.py add a module-level helper
+        `_resolve_callee(callee_name, caller_nid, candidates_by_name)` where
+        candidates_by_name maps lowercased name -> list of (nid, scope_path) built from
+        the file's nodes (scope_path derived from the node's enclosing definition, e.g.
+        class/module/function nesting already available during the walk). Resolution
+        rules: (1) if exactly one candidate, return it; (2) if multiple, prefer the
+        candidate whose scope_path is the nearest enclosing prefix of the caller's
+        scope_path; (3) if still ambiguous (no unique nearest), return None so NO false
+        'calls' edge is emitted (suppress rather than guess). Refactor the SHARED generic
+        walk_calls block (around graphify/extract.py:845-969) to build
+        candidates_by_name as name->list (not a name->single-nid dict) and call
+        _resolve_callee; keep edge fields identical (relation='calls',
+        confidence='INFERRED', weight=0.8, source_location) when a target resolves.
+        Preserve seen_call_pairs dedup. Do not touch Go/Rust/Julia/Zig resolvers yet.
+      validation: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m pytest tests/test_extract.py tests/test_languages.py tests/test_multilang.py -q
+      depends_on: [t3-baseline]
+      fatal_on_failure: true
+
+    - id: t3-wire-rest
+      description: Route the Go, Rust, Julia, and Zig resolvers through the shared scope-aware helper.
+      command: >
+        IMPLEMENT: In graphify/extract.py, update the Julia (~L1215), Go (~L1504),
+        Rust (~L1669), and Zig call-resolution blocks to build candidates_by_name as
+        name->list and call the shared `_resolve_callee` helper from t3-core-resolver,
+        matching the generic block's behavior (suppress ambiguous, prefer nearest
+        enclosing scope). If a given language's walker has no scope nesting available,
+        pass an empty scope_path for candidates so it degrades to
+        "single candidate -> resolve, multiple -> suppress". Keep all edge fields
+        identical. This step edits only graphify/extract.py (single-file; not
+        parallelizable with t3-core-resolver by design).
+      validation: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m pytest tests/test_languages.py tests/test_multilang.py -q
+      depends_on: [t3-core-resolver]
+      fatal_on_failure: false
+
+    - id: t3-tests
+      description: Add fixture tests proving ambiguous cross-scope calls are suppressed and unambiguous calls still resolve.
+      command: >
+        IMPLEMENT: In tests/test_extract.py (or a new tests/test_call_resolution.py)
+        add tests using small inline source strings written to tmp_path: (1) a file with
+        two same-named callees in different scopes where a caller in one scope must NOT
+        get a 'calls' edge to the other scope's node (ambiguity suppressed -> no edge or
+        no wrong edge); (2) a file with a single unambiguous callee still yields the
+        correct 'calls' edge; (3) at least one non-Python language fixture from
+        tests/fixtures/ still produces its expected 'calls' edges (guard against
+        over-suppression). Match existing extractor test style.
+      validation: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m pytest tests/ -k "call_resolution or extract or languages or multilang" -q
+      depends_on: [t3-core-resolver]
+      fatal_on_failure: true
+
+    - id: t3-gate
+      description: Run the full suite; Tier 3 must keep every test green.
+      command: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m pytest -q
+      validation: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 -m pytest -q >/dev/null 2>&1
+      depends_on: [t3-tests, t3-wire-rest]
+      fatal_on_failure: true
+
+    - id: t3-measure-after
+      description: Re-run the harness and confirm ambiguous 'calls' edges dropped without collapsing real edges.
+      command: cd /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify && python3 scripts/measure_call_edges.py 2>/dev/null > /tmp/gfx_calls_after.json
+      validation: >
+        python3 -c "import json; b=json.load(open('/tmp/gfx_calls_baseline.json')); a=json.load(open('/tmp/gfx_calls_after.json')); assert a['ambiguous_call_edges'] <= b['ambiguous_call_edges'], 'ambiguous edges did not drop'; assert a['unambiguous_call_edges'] >= 0.9*b['unambiguous_call_edges'], 'real edges collapsed'; print('OK')" | grep -qx OK
+      depends_on: [t3-gate]
+      fatal_on_failure: false
+
+    - id: t3-commit
+      description: Commit Tier 3 changes path-form on the feature branch.
+      command: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify add scripts/measure_call_edges.py && git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify commit graphify/extract.py tests/ scripts/measure_call_edges.py -m "fix: scope-aware call resolution to suppress false INFERRED calls edges"
+      validation: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify log -1 --pretty=%s | grep -qi "scope-aware call"
+      depends_on: [t3-gate]
+      fatal_on_failure: true
+
+    - id: t3-merge
+      description: Fast-forward merge Tier 3 into v3.
+      command: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify checkout v3 && git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify merge --ff-only feature/search-accuracy-tier3
+      validation: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify branch --contains feature/search-accuracy-tier3 | grep -qx '* v3'
+      depends_on: [t3-commit]
+      fatal_on_failure: true
+
+    - id: t3-release
+      description: Push v3 to the fork and re-pin so agents/UI get Tier 3.
+      command: git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify push origin v3 && pipx install --force /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify
+      validation: graphify --version | grep -q "site-packages" && git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify rev-parse origin/v3 | grep -q "$(git -C /Users/liborballaty/LocalProjects/GitHubProjectsDocuments/graphify rev-parse v3)"
+      depends_on: [t3-merge]
+      fatal_on_failure: false
