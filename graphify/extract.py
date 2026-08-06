@@ -18,6 +18,76 @@ def _make_id(*parts: str) -> str:
     return cleaned.strip("_").lower()
 
 
+def _scope_prefix(nid: str) -> list[str]:
+    """Enclosing-scope tokens for a node id (everything but the final name token).
+
+    Node ids are built by `_make_id`, which joins scope parts with '_'
+    (e.g. a method 'process' in class 'ClassA' of file 'sample' gets the id
+    'sample_classa_process' -> tokens ['sample', 'classa', 'process']). The
+    enclosing scope is therefore all tokens except the last, and the length of
+    the shared prefix between two scopes measures how closely nested they are.
+    """
+    toks = [t for t in nid.split("_") if t]
+    return toks[:-1]
+
+
+def _resolve_callee(callee_name: str, caller_nid: str,
+                    candidates_by_name: dict[str, list[tuple[str, list[str]]]]) -> str | None:
+    """Resolve a called name to a single target node id, or None if ambiguous.
+
+    `candidates_by_name` maps a lowercased callee name to a list of
+    ``(node_id, scope_path)`` tuples (scope_path from `_scope_prefix`).
+
+    Resolution rules (scope-aware; suppress rather than guess):
+      1. exactly one candidate            -> return it;
+      2. several candidates               -> prefer the one whose enclosing
+         scope shares the longest prefix with the caller's scope (nearest
+         enclosing definition wins);
+      3. still no unique nearest (a tie)  -> return None so NO false 'calls'
+         edge is emitted.
+
+    This preserves today's behavior for the common unambiguous case (a single
+    candidate) while eliminating wrong-scope call edges when a name is defined
+    more than once in a file (e.g. same-named methods on different classes).
+    """
+    cands = candidates_by_name.get(callee_name.lower())
+    if not cands:
+        return None
+    if len(cands) == 1:
+        return cands[0][0]
+    caller_toks = [t for t in caller_nid.split("_") if t]
+    best_ids: list[str] = []
+    best_score = -1
+    for nid, scope_path in cands:
+        score = 0
+        for a, b in zip(scope_path, caller_toks):
+            if a == b:
+                score += 1
+            else:
+                break
+        if score > best_score:
+            best_score = score
+            best_ids = [nid]
+        elif score == best_score:
+            best_ids.append(nid)
+    return best_ids[0] if len(best_ids) == 1 else None
+
+
+def _build_candidates_by_name(nodes: list[dict]) -> dict[str, list[tuple[str, list[str]]]]:
+    """Group nodes by normalized (lowercased, de-parenthesized) label.
+
+    Replaces the historical ``label_to_nid`` name->single-id dict (which
+    silently overwrote on same-name collisions) with a name->list mapping so
+    `_resolve_callee` can disambiguate by scope instead of guessing.
+    """
+    candidates_by_name: dict[str, list[tuple[str, list[str]]]] = {}
+    for n in nodes:
+        normalised = n["label"].strip("()").lstrip(".")
+        key = normalised.lower()
+        candidates_by_name.setdefault(key, []).append((n["id"], _scope_prefix(n["id"])))
+    return candidates_by_name
+
+
 # ── LanguageConfig dataclass ─────────────────────────────────────────────────
 
 @dataclass
@@ -842,11 +912,7 @@ def _extract_generic(path: Path, config: LanguageConfig) -> dict:
     walk(root)
 
     # ── Call-graph pass ───────────────────────────────────────────────────────
-    label_to_nid: dict[str, str] = {}
-    for n in nodes:
-        raw = n["label"]
-        normalised = raw.strip("()").lstrip(".")
-        label_to_nid[normalised.lower()] = n["id"]
+    candidates_by_name = _build_candidates_by_name(nodes)
 
     seen_call_pairs: set[tuple[str, str]] = set()
 
@@ -946,7 +1012,7 @@ def _extract_generic(path: Path, config: LanguageConfig) -> dict:
                         callee_name = _read_text(func_node, source)
 
             if callee_name:
-                tgt_nid = label_to_nid.get(callee_name.lower())
+                tgt_nid = _resolve_callee(callee_name, caller_nid, candidates_by_name)
                 if tgt_nid and tgt_nid != caller_nid:
                     pair = (caller_nid, tgt_nid)
                     if pair not in seen_call_pairs:
@@ -1223,14 +1289,14 @@ def extract_julia(path: Path) -> dict:
             # Direct call: foo(...)
             if callee.type == "identifier":
                 callee_name = _read_text(callee, source)
-                target_nid = _make_id(stem, callee_name)
+                target_nid = _resolve_callee(callee_name, func_nid, candidates_by_name) or _make_id(stem, callee_name)
                 add_edge(func_nid, target_nid, "calls", body_node.start_point[0] + 1,
                          confidence="EXTRACTED")
             # Method call: obj.method(...)
             elif callee.type == "field_expression" and len(callee.children) >= 3:
                 method_node = callee.children[-1]
                 method_name = _read_text(method_node, source)
-                target_nid = _make_id(stem, method_name)
+                target_nid = _resolve_callee(method_name, func_nid, candidates_by_name) or _make_id(stem, method_name)
                 add_edge(func_nid, target_nid, "calls", body_node.start_point[0] + 1,
                          confidence="EXTRACTED")
         for child in body_node.children:
@@ -1348,6 +1414,7 @@ def extract_julia(path: Path) -> dict:
 
     walk(root, file_nid)
 
+    candidates_by_name = _build_candidates_by_name(nodes)
     for func_nid, body_node in function_bodies:
         # For function_definition nodes, walk children directly to avoid
         # the boundary check returning early on the top-level node itself.
@@ -1501,11 +1568,7 @@ def extract_go(path: Path) -> dict:
 
     walk(root)
 
-    label_to_nid: dict[str, str] = {}
-    for n in nodes:
-        raw = n["label"]
-        normalised = raw.strip("()").lstrip(".")
-        label_to_nid[normalised.lower()] = n["id"]
+    candidates_by_name = _build_candidates_by_name(nodes)
 
     seen_call_pairs: set[tuple[str, str]] = set()
 
@@ -1523,7 +1586,7 @@ def extract_go(path: Path) -> dict:
                     if field:
                         callee_name = _read_text(field, source)
             if callee_name:
-                tgt_nid = label_to_nid.get(callee_name.lower())
+                tgt_nid = _resolve_callee(callee_name, caller_nid, candidates_by_name)
                 if tgt_nid and tgt_nid != caller_nid:
                     pair = (caller_nid, tgt_nid)
                     if pair not in seen_call_pairs:
@@ -1666,11 +1729,7 @@ def extract_rust(path: Path) -> dict:
 
     walk(root)
 
-    label_to_nid: dict[str, str] = {}
-    for n in nodes:
-        raw = n["label"]
-        normalised = raw.strip("()").lstrip(".")
-        label_to_nid[normalised.lower()] = n["id"]
+    candidates_by_name = _build_candidates_by_name(nodes)
 
     seen_call_pairs: set[tuple[str, str]] = set()
 
@@ -1692,7 +1751,7 @@ def extract_rust(path: Path) -> dict:
                     if name:
                         callee_name = _read_text(name, source)
             if callee_name:
-                tgt_nid = label_to_nid.get(callee_name.lower())
+                tgt_nid = _resolve_callee(callee_name, caller_nid, candidates_by_name)
                 if tgt_nid and tgt_nid != caller_nid:
                     pair = (caller_nid, tgt_nid)
                     if pair not in seen_call_pairs:
@@ -1849,6 +1908,7 @@ def extract_zig(path: Path) -> dict:
 
     walk(root)
 
+    candidates_by_name = _build_candidates_by_name(nodes)
     seen_call_pairs: set[tuple[str, str]] = set()
 
     def walk_calls(node, caller_nid: str) -> None:
@@ -1858,8 +1918,7 @@ def extract_zig(path: Path) -> dict:
             fn = node.child_by_field_name("function")
             if fn:
                 callee = _read_text(fn, source).split(".")[-1]
-                tgt_nid = next((n["id"] for n in nodes if n["label"] in
-                                (f"{callee}()", f".{callee}()")), None)
+                tgt_nid = _resolve_callee(callee, caller_nid, candidates_by_name)
                 if tgt_nid and tgt_nid != caller_nid:
                     pair = (caller_nid, tgt_nid)
                     if pair not in seen_call_pairs:
@@ -2004,7 +2063,7 @@ def extract_powershell(path: Path) -> dict:
 
     walk(root)
 
-    label_to_nid = {n["label"].strip("()").lstrip(".").lower(): n["id"] for n in nodes}
+    candidates_by_name = _build_candidates_by_name(nodes)
     seen_call_pairs: set[tuple[str, str]] = set()
 
     def walk_calls(node, caller_nid: str) -> None:
@@ -2015,7 +2074,7 @@ def extract_powershell(path: Path) -> dict:
             if cmd_name_node:
                 cmd_text = _read_text(cmd_name_node, source)
                 if cmd_text.lower() not in _PS_SKIP:
-                    tgt_nid = label_to_nid.get(cmd_text.lower())
+                    tgt_nid = _resolve_callee(cmd_text, caller_nid, candidates_by_name)
                     if tgt_nid and tgt_nid != caller_nid:
                         pair = (caller_nid, tgt_nid)
                         if pair not in seen_call_pairs:
@@ -2488,10 +2547,7 @@ def extract_elixir(path: Path) -> dict:
 
     walk(root)
 
-    label_to_nid: dict[str, str] = {}
-    for n in nodes:
-        normalised = n["label"].strip("()").lstrip(".")
-        label_to_nid[normalised.lower()] = n["id"]
+    candidates_by_name = _build_candidates_by_name(nodes)
 
     seen_call_pairs: set[tuple[str, str]] = set()
     _SKIP_KEYWORDS = frozenset({
@@ -2526,7 +2582,7 @@ def extract_elixir(path: Path) -> dict:
                 callee_name = source[child.start_byte:child.end_byte].decode("utf-8", errors="replace")
                 break
         if callee_name:
-            tgt_nid = label_to_nid.get(callee_name.lower())
+            tgt_nid = _resolve_callee(callee_name, caller_nid, candidates_by_name)
             if tgt_nid and tgt_nid != caller_nid:
                 pair = (caller_nid, tgt_nid)
                 if pair not in seen_call_pairs:
