@@ -64,6 +64,18 @@ For grouped multimodal runs, Graphify standardizes the handoff paths:
 
 Once the results directory has JSON files for a prepared profile, rerun `/graphify run docs <path>` or `/graphify run all <path>` and Graphify will auto-finalize that profile. You can also call `/graphify finalize-profile <path> --profile NAME` directly; it now defaults to the standard `semantic-results/` directory when `--semantic` is omitted.
 
+### Driving semantic extraction with subagents — read the manifest once
+
+When you fan out subagents to extract a prepared docs/multimodal profile:
+
+- The orchestrator reads the run structure **once**. Hand each subagent **only its own `chunk-XXX.txt`** prompt file — that file already contains its file list and extraction schema.
+- **Do NOT have each subagent read the whole `.graphify-state/semantic-prompts.json` manifest.** That manifest can be 40–70k tokens; making N subagents each load it to find one ~1k-token slice wastes roughly N× the tokens. The per-chunk `chunk-XXX.txt` files exist precisely so subagents never touch the manifest.
+- Each subagent writes its result to `semantic-results/chunk-XXX.json`; the run is resumable by skipping any chunk whose result file already exists (extraction runs on your subscription, so a tripped session limit can simply be resumed).
+
+### Deduplicate docs corpora before extraction
+
+Documentation sites frequently ship the same reference many times — versioned snapshots plus per-language mirrors. In a docs profile's `excludes` (in `.graphifyprofiles.json`), drop `**/versioned_docs/**` and the non-primary language directories (keep one of e.g. `nodejs/`, `python/`, `java/`, `dotnet/`). This can shrink a corpus ~10× and removes the duplicate concept nodes that would otherwise pollute the graph.
+
 ## What graphify is for
 
 graphify is built around Andrej Karpathy's /raw folder workflow: drop anything into a folder - papers, tweets, screenshots, code, notes - and get a structured knowledge graph that shows you what you didn't know was connected.
