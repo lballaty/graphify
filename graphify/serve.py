@@ -1,5 +1,6 @@
 # MCP stdio server - exposes graph query tools to Claude and other agents
 from __future__ import annotations
+import difflib
 import json
 import re
 import sys
@@ -101,6 +102,36 @@ def _score_nodes(G: nx.Graph, terms: list[str]) -> list[tuple[float, str]]:
     # score desc, then degree desc, then id for stable ties.
     scored.sort(key=lambda s: (-s[0], -degrees.get(s[1], 0), s[1]))
     return scored
+
+
+def _fuzzy_node_ids(G: nx.Graph, terms: list[str], limit: int = 5) -> list[str]:
+    """Difflib fuzzy fallback: map query terms to the nearest node labels/tokens.
+
+    Only used when exact/substring scoring returns nothing, so a typo'd query
+    ('extrac' -> 'extract') still surfaces candidates. Deterministic: best match
+    ratio, then higher degree, then id.
+    """
+    term_list = [t for t in terms if t]
+    if not term_list:
+        return []
+    vocab: dict[str, list[str]] = {}
+    for nid, data in G.nodes(data=True):
+        label = data.get("label", "")
+        for w in set(_tokenize(label)) | ({label.lower()} if label else set()):
+            if w:
+                vocab.setdefault(w, []).append(nid)
+    if not vocab:
+        return []
+    words = list(vocab)
+    best: dict[str, float] = {}
+    for t in term_list:
+        for m in difflib.get_close_matches(t, words, n=limit * 3, cutoff=0.75):
+            ratio = difflib.SequenceMatcher(None, t, m).ratio()
+            for nid in vocab[m]:
+                if ratio > best.get(nid, 0.0):
+                    best[nid] = ratio
+    ranked = sorted(best.items(), key=lambda kv: (-kv[1], -G.degree(kv[0]), kv[0]))
+    return [nid for nid, _ in ranked[:limit]]
 
 
 def _bfs(G: nx.Graph, start_nodes: list[str], depth: int) -> tuple[set[str], list[tuple]]:
@@ -210,6 +241,8 @@ def _find_node(G: nx.Graph, label: str) -> list[str]:
         if exact or prefix or substr:
             scored.append((exact * 2.0 + prefix * 1.2 + substr * 0.5 + G.degree(nid) / 1000.0, nid))
     scored.sort(key=lambda s: (-s[0], s[1]))
+    if not scored:
+        return _fuzzy_node_ids(G, _tokenize(label))
     return [nid for _, nid in scored]
 
 
@@ -308,11 +341,15 @@ def serve(graph_path: str | None = None) -> None:
         terms = _tokenize(question)
         scored = _score_nodes(G, terms)
         start_nodes = [nid for _, nid in scored[:3]]
+        fuzzy_note = ""
         if not start_nodes:
-            return "No matching nodes found."
+            start_nodes = _fuzzy_node_ids(G, terms)
+            if not start_nodes:
+                return "No matching nodes found."
+            fuzzy_note = "(fuzzy match — no exact hits)\n"
         nodes, edges = _dfs(G, start_nodes, depth) if mode == "dfs" else _bfs(G, start_nodes, depth)
         header = f"Traversal: {mode.upper()} depth={depth} | Start: {[G.nodes[n].get('label', n) for n in start_nodes]} | {len(nodes)} nodes found\n\n"
-        return header + _subgraph_to_text(G, nodes, edges, budget, terms=terms)
+        return fuzzy_note + header + _subgraph_to_text(G, nodes, edges, budget, terms=terms)
 
     def _tool_get_node(arguments: dict) -> str:
         matches = _find_node(G, arguments["label"])

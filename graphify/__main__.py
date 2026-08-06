@@ -1076,7 +1076,7 @@ def main() -> None:
             print("Usage: graphify query \"<question>\" [--dfs] [--budget N] [--graph path]", file=sys.stderr)
             sys.exit(1)
         from graphify.index import resolve_default_graph_path
-        from graphify.serve import _score_nodes, _bfs, _dfs, _subgraph_to_text, _tokenize
+        from graphify.serve import _score_nodes, _bfs, _dfs, _subgraph_to_text, _tokenize, _fuzzy_node_ids
         from graphify.security import sanitize_label
         from networkx.readwrite import json_graph
         question = sys.argv[2]
@@ -1128,10 +1128,13 @@ def main() -> None:
             sys.exit(1)
         terms = _tokenize(question)
         scored = _score_nodes(G, terms)
-        if not scored:
-            print("No matching nodes found.")
-            sys.exit(0)
         start = [nid for _, nid in scored[:5]]
+        if not start:
+            start = _fuzzy_node_ids(G, terms)
+            if not start:
+                print("No matching nodes found.")
+                sys.exit(0)
+            print("(fuzzy match — no exact hits)")
         nodes, edges = (_dfs if use_dfs else _bfs)(G, start, depth=2)
         print(_subgraph_to_text(G, nodes, edges, token_budget=budget, terms=terms))
     elif cmd == "benchmark":

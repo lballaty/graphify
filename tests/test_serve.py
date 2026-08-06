@@ -13,6 +13,7 @@ from graphify.serve import (
     _load_graph,
     _tokenize,
     _find_node,
+    _fuzzy_node_ids,
 )
 
 
@@ -265,3 +266,30 @@ def test_subgraph_to_text_budget_uses_four_chars_per_token():
     assert "truncated" in text
     body = text.split("\n... (truncated")[0]
     assert len(body) <= 100 * 4
+
+
+# --- difflib fuzzy fallback (typo-tolerant search) ---
+
+def test_fuzzy_node_ids_matches_typo():
+    G = nx.Graph()
+    G.add_node("n1", label="extract", source_file="a.py")
+    assert _fuzzy_node_ids(G, ["extrac"]) == ["n1"]
+
+def test_fuzzy_not_used_when_exact_match_exists():
+    # When _score_nodes finds an exact hit, that node ranks first; fuzzy is a
+    # last resort, so a real term never falls through to fuzzy.
+    G = nx.Graph()
+    G.add_node("n1", label="cluster", source_file="a.py")
+    G.add_node("n2", label="cluster_typo_neighbor", source_file="b.py")
+    scored = _score_nodes(G, ["cluster"])
+    assert scored and scored[0][1] == "n1"
+
+def test_find_node_fuzzy_fallback_on_near_miss():
+    G = nx.Graph()
+    G.add_node("n1", label="cluster", source_file="a.py")
+    # 'clustr' has no exact/token/substring hit -> fuzzy fallback returns cluster
+    assert _find_node(G, "clustr") == ["n1"]
+
+def test_fuzzy_node_ids_empty_inputs():
+    assert _fuzzy_node_ids(_make_graph(), []) == []
+    assert _fuzzy_node_ids(nx.Graph(), ["anything"]) == []
