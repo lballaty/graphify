@@ -109,19 +109,16 @@ def _is_concept_node(G: nx.Graph, node_id: str) -> bool:
     return False
 
 
-_CODE_EXTENSIONS = {"py", "ts", "tsx", "js", "go", "rs", "java", "rb", "cpp", "c", "h", "cs", "kt", "scala", "php"}
-_DOC_EXTENSIONS = {"md", "mdx", "txt", "rst"}
-_PAPER_EXTENSIONS = {"pdf"}
-_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif", "svg"}
+from graphify.detect import CODE_EXTENSIONS, DOC_EXTENSIONS, PAPER_EXTENSIONS, IMAGE_EXTENSIONS
 
 
 def _file_category(path: str) -> str:
-    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
-    if ext in _CODE_EXTENSIONS:
+    ext = ("." + path.rsplit(".", 1)[-1].lower()) if "." in path else ""
+    if ext in CODE_EXTENSIONS:
         return "code"
-    if ext in _PAPER_EXTENSIONS:
+    if ext in PAPER_EXTENSIONS:
         return "paper"
-    if ext in _IMAGE_EXTENSIONS:
+    if ext in IMAGE_EXTENSIONS:
         return "image"
     return "doc"
 
@@ -472,6 +469,8 @@ def graph_diff(G_old: nx.Graph, G_new: nx.Graph) -> dict:
     ]
 
     def edge_key(G: nx.Graph, u: str, v: str, data: dict) -> tuple:
+        if G.is_directed():
+            return (u, v, data.get("relation", ""))
         return (min(u, v), max(u, v), data.get("relation", ""))
 
     old_edge_keys = {

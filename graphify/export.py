@@ -110,6 +110,11 @@ const RAW_NODES = {nodes_json};
 const RAW_EDGES = {edges_json};
 const LEGEND = {legend_json};
 
+// HTML-escape helper — prevents XSS when injecting graph data into innerHTML
+function esc(s) {{
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}}
+
 // Build vis datasets
 const nodesDS = new vis.DataSet(RAW_NODES.map(n => ({{
   id: n.id, label: n.label, color: n.color, size: n.size,
@@ -165,13 +170,13 @@ function showInfo(nodeId) {{
   const neighborItems = neighborIds.map(nid => {{
     const nb = nodesDS.get(nid);
     const color = nb ? nb.color.background : '#555';
-    return `<span class="neighbor-link" style="border-left-color:${{color}}" onclick="focusNode('${{nid}}')">${{nb ? nb.label : nid}}</span>`;
+    return `<span class="neighbor-link" style="border-left-color:${{esc(color)}}" onclick="focusNode(${{JSON.stringify(nid)}})">${{esc(nb ? nb.label : nid)}}</span>`;
   }}).join('');
   document.getElementById('info-content').innerHTML = `
-    <div class="field"><b>${{n.label}}</b></div>
-    <div class="field">Type: ${{n._file_type || 'unknown'}}</div>
-    <div class="field">Community: ${{n._community_name}}</div>
-    <div class="field">Source: ${{n._source_file || '-'}}</div>
+    <div class="field"><b>${{esc(n.label)}}</b></div>
+    <div class="field">Type: ${{esc(n._file_type || 'unknown')}}</div>
+    <div class="field">Community: ${{esc(n._community_name)}}</div>
+    <div class="field">Source: ${{esc(n._source_file || '-')}}</div>
     <div class="field">Degree: ${{n._degree}}</div>
     ${{neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${{neighborIds.length}})</div><div id="neighbors-list">${{neighborItems}}</div>` : ''}}
   `;
@@ -183,9 +188,28 @@ function focusNode(nodeId) {{
   showInfo(nodeId);
 }}
 
+// Track hovered node — hover detection is more reliable than click params
+let hoveredNodeId = null;
+network.on('hoverNode', params => {{
+  hoveredNodeId = params.node;
+  container.style.cursor = 'pointer';
+}});
+network.on('blurNode', () => {{
+  hoveredNodeId = null;
+  container.style.cursor = 'default';
+}});
+container.addEventListener('click', () => {{
+  if (hoveredNodeId !== null) {{
+    showInfo(hoveredNodeId);
+    network.selectNodes([hoveredNodeId]);
+  }}
+}});
 network.on('click', params => {{
-  if (params.nodes.length > 0) showInfo(params.nodes[0]);
-  else document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+  if (params.nodes.length > 0) {{
+    showInfo(params.nodes[0]);
+  }} else if (hoveredNodeId === null) {{
+    document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+  }}
 }});
 
 const searchInput = document.getElementById('search');
@@ -260,7 +284,10 @@ def attach_hyperedges(G: nx.Graph, hyperedges: list) -> None:
 
 def to_json(G: nx.Graph, communities: dict[int, list[str]], output_path: str) -> None:
     node_community = _node_community_map(communities)
-    data = json_graph.node_link_data(G, edges="links")
+    try:
+        data = json_graph.node_link_data(G, edges="links")
+    except TypeError:
+        data = json_graph.node_link_data(G)
     for node in data["nodes"]:
         node["community"] = node_community.get(node["id"])
     for link in data["links"]:
@@ -337,7 +364,7 @@ def to_html(
             "color": {"background": color, "border": color, "highlight": {"background": "#ffffff", "border": color}},
             "size": round(size, 1),
             "font": {"size": font_size, "color": "#ffffff"},
-            "title": f"{label}",
+            "title": _html.escape(label),
             "community": cid,
             "community_name": sanitize_label((community_labels or {}).get(cid, f"Community {cid}")),
             "source_file": sanitize_label(data.get("source_file", "")),
@@ -354,7 +381,7 @@ def to_html(
             "from": u,
             "to": v,
             "label": relation,
-            "title": f"{relation} [{confidence}]",
+            "title": _html.escape(f"{relation} [{confidence}]"),
             "dashes": confidence != "EXTRACTED",
             "width": 2 if confidence == "EXTRACTED" else 1,
             "color": {"opacity": 0.7 if confidence == "EXTRACTED" else 0.35},
@@ -436,7 +463,7 @@ def to_obsidian(
     # Map node_id → safe filename so wikilinks stay consistent.
     # Deduplicate: if two nodes produce the same filename, append a numeric suffix.
     def safe_name(label: str) -> str:
-        return re.sub(r'[\\/*?:"<>|#^[\]]', "", label).strip() or "unnamed"
+        return re.sub(r'[\\/*?:"<>|#^[\]]', "", label.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")).strip() or "unnamed"
 
     node_filename: dict[str, str] = {}
     seen_names: dict[str, int] = {}
@@ -672,7 +699,7 @@ def to_canvas(
     CANVAS_COLORS = ["1", "2", "3", "4", "5", "6"]  # red, orange, yellow, green, cyan, purple
 
     def safe_name(label: str) -> str:
-        return re.sub(r'[\\/*?:"<>|#^[\]]', "", label).strip() or "unnamed"
+        return re.sub(r'[\\/*?:"<>|#^[\]]', "", label.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")).strip() or "unnamed"
 
     # Build node_filenames if not provided (same dedup logic as to_obsidian)
     if node_filenames is None:

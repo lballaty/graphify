@@ -956,10 +956,10 @@ def _extract_generic(path: Path, config: LanguageConfig) -> dict:
                             "source": caller_nid,
                             "target": tgt_nid,
                             "relation": "calls",
-                            "confidence": "INFERRED",
+                            "confidence": "EXTRACTED",
                             "source_file": str_path,
                             "source_location": f"L{line}",
-                            "weight": 0.8,
+                            "weight": 1.0,
                         })
 
         for child in node.children:
@@ -1021,7 +1021,7 @@ def _extract_python_rationale(path: Path, result: dict) -> None:
         return None
 
     def _add_rationale(text: str, line: int, parent_nid: str) -> None:
-        label = text[:80].replace("\n", " ").strip()
+        label = text[:80].replace("\r\n", " ").replace("\r", " ").replace("\n", " ").strip()
         rid = _make_id(stem, "rationale", str(line))
         if rid not in seen_ids:
             seen_ids.add(rid)
@@ -1533,10 +1533,10 @@ def extract_go(path: Path) -> dict:
                             "source": caller_nid,
                             "target": tgt_nid,
                             "relation": "calls",
-                            "confidence": "INFERRED",
+                            "confidence": "EXTRACTED",
                             "source_file": str_path,
                             "source_location": f"L{line}",
-                            "weight": 0.8,
+                            "weight": 1.0,
                         })
         for child in node.children:
             walk_calls(child, caller_nid)
@@ -1702,10 +1702,10 @@ def extract_rust(path: Path) -> dict:
                             "source": caller_nid,
                             "target": tgt_nid,
                             "relation": "calls",
-                            "confidence": "INFERRED",
+                            "confidence": "EXTRACTED",
                             "source_file": str_path,
                             "source_location": f"L{line}",
-                            "weight": 0.8,
+                            "weight": 1.0,
                         })
         for child in node.children:
             walk_calls(child, caller_nid)
@@ -1866,7 +1866,7 @@ def extract_zig(path: Path) -> dict:
                         seen_call_pairs.add(pair)
                         add_edge(caller_nid, tgt_nid, "calls",
                                  node.start_point[0] + 1,
-                                 confidence="INFERRED", weight=0.8)
+                                 confidence="EXTRACTED", weight=1.0)
         for child in node.children:
             walk_calls(child, caller_nid)
 
@@ -2022,7 +2022,7 @@ def extract_powershell(path: Path) -> dict:
                             seen_call_pairs.add(pair)
                             add_edge(caller_nid, tgt_nid, "calls",
                                      node.start_point[0] + 1,
-                                     confidence="INFERRED", weight=0.8)
+                                     confidence="EXTRACTED", weight=1.0)
         for child in node.children:
             walk_calls(child, caller_nid)
 
@@ -2359,7 +2359,7 @@ def extract_objc(path: Path) -> dict:
                                 if pair not in seen_calls and caller_nid != candidate:
                                     seen_calls.add(pair)
                                     add_edge(caller_nid, candidate, "calls", body_node.start_point[0] + 1,
-                                             confidence="INFERRED", weight=0.8)
+                                             confidence="EXTRACTED", weight=1.0)
             for child in n.children:
                 walk_calls(child)
         walk_calls(body_node)
@@ -2532,7 +2532,7 @@ def extract_elixir(path: Path) -> dict:
                 if pair not in seen_call_pairs:
                     seen_call_pairs.add(pair)
                     add_edge(caller_nid, tgt_nid, "calls",
-                             node.start_point[0] + 1, confidence="INFERRED", weight=0.8)
+                             node.start_point[0] + 1, confidence="EXTRACTED", weight=1.0)
         for child in node.children:
             walk_calls(child, caller_nid)
 
@@ -2546,6 +2546,25 @@ def extract_elixir(path: Path) -> dict:
 
 # ── Main extract and collect_files ────────────────────────────────────────────
 
+
+def _check_tree_sitter_version() -> None:
+    """Raise a clear error if tree-sitter is too old for the new Language API."""
+    try:
+        from tree_sitter import LANGUAGE_VERSION
+    except ImportError:
+        raise ImportError(
+            "tree-sitter is not installed. Run: pip install 'tree-sitter>=0.23.0'"
+        )
+    # Language API v2 starts at LANGUAGE_VERSION 14
+    if LANGUAGE_VERSION < 14:
+        import tree_sitter as _ts
+        raise RuntimeError(
+            f"tree-sitter {getattr(_ts, '__version__', 'unknown')} is too old. "
+            f"graphify requires tree-sitter >= 0.23.0 (Language API v2). "
+            f"Run: pip install --upgrade tree-sitter"
+        )
+
+
 def extract(paths: list[Path]) -> dict:
     """Extract AST nodes and edges from a list of code files.
 
@@ -2554,6 +2573,7 @@ def extract(paths: list[Path]) -> dict:
     2. Cross-file import resolution: turns file-level imports into
        class-level INFERRED edges (DigestAuth --uses--> Response)
     """
+    _check_tree_sitter_version()
     per_file: list[dict] = []
 
     # Infer a common root for cache keys

@@ -9,6 +9,10 @@ PLATFORMS = {
     "codex": (".agents/skills/graphify/SKILL.md",),
     "opencode": (".config/opencode/skills/graphify/SKILL.md",),
     "claw": (".claw/skills/graphify/SKILL.md",),
+    "droid": (".factory/skills/graphify/SKILL.md",),
+    "trae": (".trae/skills/graphify/SKILL.md",),
+    "trae-cn": (".trae-cn/skills/graphify/SKILL.md",),
+    "windows": (".claude/skills/graphify/SKILL.md",),
 }
 
 
@@ -36,6 +40,26 @@ def test_install_opencode(tmp_path):
 def test_install_claw(tmp_path):
     _install(tmp_path, "claw")
     assert (tmp_path / ".claw" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_install_droid(tmp_path):
+    _install(tmp_path, "droid")
+    assert (tmp_path / ".factory" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_install_trae(tmp_path):
+    _install(tmp_path, "trae")
+    assert (tmp_path / ".trae" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_install_trae_cn(tmp_path):
+    _install(tmp_path, "trae-cn")
+    assert (tmp_path / ".trae-cn" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_install_windows(tmp_path):
+    _install(tmp_path, "windows")
+    assert (tmp_path / ".claude" / "skills" / "graphify" / "SKILL.md").exists()
 
 
 def test_install_unknown_platform_exits(tmp_path):
@@ -69,10 +93,10 @@ def test_claw_skill_is_sequential():
 
 
 def test_all_skill_files_exist_in_package():
-    """All four platform skill files must be present in the installed package."""
+    """All installable platform skill files must be present in the installed package."""
     import graphify
     pkg = Path(graphify.__file__).parent
-    for name in ("skill.md", "skill-codex.md", "skill-opencode.md", "skill-claw.md"):
+    for name in ("skill.md", "skill-codex.md", "skill-opencode.md", "skill-claw.md", "skill-windows.md", "skill-droid.md", "skill-trae.md"):
         assert (pkg / name).exists(), f"Missing: {name}"
 
 
@@ -167,3 +191,140 @@ def test_agents_uninstall_no_op_when_not_installed(tmp_path, capsys):
     _agents_uninstall(tmp_path)
     out = capsys.readouterr().out
     assert "nothing to do" in out
+
+
+# --- OpenCode plugin tests ---
+
+def test_opencode_agents_install_writes_plugin(tmp_path):
+    """opencode install writes .opencode/plugins/graphify.js."""
+    _agents_install(tmp_path, "opencode")
+    plugin = tmp_path / ".opencode" / "plugins" / "graphify.js"
+    assert plugin.exists()
+    assert "tool.execute.before" in plugin.read_text()
+
+
+def test_opencode_agents_install_registers_plugin_in_config(tmp_path):
+    """opencode install registers the plugin in opencode.json."""
+    _agents_install(tmp_path, "opencode")
+    config_file = tmp_path / "opencode.json"
+    assert config_file.exists()
+    import json as _json
+    config = _json.loads(config_file.read_text())
+    assert any("graphify.js" in p for p in config.get("plugin", []))
+
+
+def test_opencode_agents_install_merges_existing_config(tmp_path):
+    """opencode install preserves existing opencode.json keys."""
+    import json as _json
+    config_file = tmp_path / "opencode.json"
+    config_file.write_text(_json.dumps({"model": "claude-opus-4-5", "plugin": []}))
+    _agents_install(tmp_path, "opencode")
+    config = _json.loads(config_file.read_text())
+    assert config["model"] == "claude-opus-4-5"
+    assert any("graphify.js" in p for p in config["plugin"])
+
+
+def test_opencode_agents_uninstall_removes_plugin(tmp_path):
+    """opencode uninstall removes the plugin file and deregisters from opencode.json."""
+    import json as _json
+    _agents_install(tmp_path, "opencode")
+    _agents_uninstall(tmp_path)
+    plugin = tmp_path / ".opencode" / "plugins" / "graphify.js"
+    assert not plugin.exists()
+    config_file = tmp_path / "opencode.json"
+    if config_file.exists():
+        config = _json.loads(config_file.read_text())
+        assert not any("graphify.js" in p for p in config.get("plugin", []))
+
+
+# ── Cursor ────────────────────────────────────────────────────────────────────
+
+def test_cursor_install_writes_rule(tmp_path):
+    """cursor install writes .cursor/rules/graphify.mdc."""
+    from graphify.__main__ import _cursor_install
+    _cursor_install(tmp_path)
+    rule = tmp_path / ".cursor" / "rules" / "graphify.mdc"
+    assert rule.exists()
+    content = rule.read_text()
+    assert "alwaysApply: true" in content
+    assert "graphify-out/GRAPH_REPORT.md" in content
+
+
+def test_cursor_install_idempotent(tmp_path):
+    """cursor install does not overwrite an existing rule file."""
+    from graphify.__main__ import _cursor_install
+    _cursor_install(tmp_path)
+    rule = tmp_path / ".cursor" / "rules" / "graphify.mdc"
+    original = rule.read_text()
+    _cursor_install(tmp_path)
+    assert rule.read_text() == original
+
+
+def test_cursor_uninstall_removes_rule(tmp_path):
+    """cursor uninstall removes the rule file."""
+    from graphify.__main__ import _cursor_install, _cursor_uninstall
+    _cursor_install(tmp_path)
+    _cursor_uninstall(tmp_path)
+    rule = tmp_path / ".cursor" / "rules" / "graphify.mdc"
+    assert not rule.exists()
+
+
+def test_cursor_uninstall_noop_if_not_installed(tmp_path):
+    """cursor uninstall does nothing if rule was never written."""
+    from graphify.__main__ import _cursor_uninstall
+    _cursor_uninstall(tmp_path)  # should not raise
+
+
+# ── Gemini CLI ────────────────────────────────────────────────────────────────
+
+def test_gemini_install_writes_gemini_md(tmp_path):
+    from graphify.__main__ import gemini_install
+    gemini_install(tmp_path)
+    md = tmp_path / "GEMINI.md"
+    assert md.exists()
+    assert "graphify-out/GRAPH_REPORT.md" in md.read_text()
+
+def test_gemini_install_writes_hook(tmp_path):
+    import json as _json
+    from graphify.__main__ import gemini_install
+    gemini_install(tmp_path)
+    settings = _json.loads((tmp_path / ".gemini" / "settings.json").read_text())
+    hooks = settings["hooks"]["BeforeTool"]
+    assert any("graphify" in str(h) for h in hooks)
+
+def test_gemini_install_idempotent(tmp_path):
+    from graphify.__main__ import gemini_install
+    gemini_install(tmp_path)
+    gemini_install(tmp_path)
+    md = tmp_path / "GEMINI.md"
+    assert md.read_text().count("## graphify") == 1
+
+def test_gemini_install_merges_existing_gemini_md(tmp_path):
+    from graphify.__main__ import gemini_install
+    (tmp_path / "GEMINI.md").write_text("# My project rules\n")
+    gemini_install(tmp_path)
+    content = (tmp_path / "GEMINI.md").read_text()
+    assert "# My project rules" in content
+    assert "graphify-out/GRAPH_REPORT.md" in content
+
+def test_gemini_uninstall_removes_section(tmp_path):
+    from graphify.__main__ import gemini_install, gemini_uninstall
+    gemini_install(tmp_path)
+    gemini_uninstall(tmp_path)
+    md = tmp_path / "GEMINI.md"
+    assert not md.exists()
+
+def test_gemini_uninstall_removes_hook(tmp_path):
+    import json as _json
+    from graphify.__main__ import gemini_install, gemini_uninstall
+    gemini_install(tmp_path)
+    gemini_uninstall(tmp_path)
+    settings_path = tmp_path / ".gemini" / "settings.json"
+    if settings_path.exists():
+        settings = _json.loads(settings_path.read_text())
+        hooks = settings.get("hooks", {}).get("BeforeTool", [])
+        assert not any("graphify" in str(h) for h in hooks)
+
+def test_gemini_uninstall_noop_if_not_installed(tmp_path):
+    from graphify.__main__ import gemini_uninstall
+    gemini_uninstall(tmp_path)  # should not raise

@@ -455,7 +455,10 @@ def serve(graph_path: str | None = None) -> None:
         handler = _handlers.get(name)
         if not handler:
             return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
-        return [types.TextContent(type="text", text=handler(arguments))]
+        try:
+            return [types.TextContent(type="text", text=handler(arguments))]
+        except Exception as exc:
+            return [types.TextContent(type="text", text=f"Error executing {name}: {exc}")]
 
     import asyncio
 
