@@ -222,3 +222,46 @@ def test_load_graph_missing_file(tmp_path):
     graphify_dir.mkdir()
     with pytest.raises(SystemExit):
         _load_graph(str(graphify_dir / "nonexistent.json"))
+
+
+# --- accuracy fixes: stemming, dampened boost, relevance-ordered render, ratio ---
+
+def test_score_nodes_prefix_stem_match():
+    # query term 'detection' should match a node whose token is 'detect'
+    G = nx.Graph()
+    G.add_node("n1", label="detect_incremental", source_file="detect.py")
+    scored = _score_nodes(G, _tokenize("detection"))
+    assert scored and scored[0][1] == "n1"
+
+def test_score_nodes_specific_exact_beats_weakly_matched_hub():
+    # Regression guard for the degree-boost bug: an exact-token match on a specific
+    # low-degree node must outrank a high-degree hub that only prefix-matches.
+    G = nx.Graph()
+    G.add_node("specific", label="permissions", source_file="perms.py")            # exact token
+    G.add_node("hub", label="permission_manager_service", source_file="core.py")   # prefix only
+    for i in range(20):
+        G.add_node(f"x{i}", label=f"n{i}")
+        G.add_edge("hub", f"x{i}")
+    scored = _score_nodes(G, ["permissions"])
+    assert scored[0][1] == "specific"
+
+def test_subgraph_to_text_relevance_orders_over_degree():
+    # With terms, a query-relevant low-degree node renders before an irrelevant hub.
+    G = nx.Graph()
+    G.add_node("hub", label="index", source_file="index.md")
+    G.add_node("rel", label="readTextFile", source_file="fs.md")
+    for i in range(10):
+        G.add_node(f"x{i}", label=f"n{i}")
+        G.add_edge("hub", f"x{i}")
+    text = _subgraph_to_text(G, {"hub", "rel"}, [], token_budget=2000, terms=["read"])
+    node_lines = [ln for ln in text.splitlines() if ln.startswith("NODE")]
+    assert "readTextFile" in node_lines[0]
+
+def test_subgraph_to_text_budget_uses_four_chars_per_token():
+    G = nx.Graph()
+    for i in range(200):
+        G.add_node(f"n{i}", label=f"node_number_{i}", source_file=f"f{i}.py")
+    text = _subgraph_to_text(G, {f"n{i}" for i in range(200)}, [], token_budget=100)
+    assert "truncated" in text
+    body = text.split("\n... (truncated")[0]
+    assert len(body) <= 100 * 4

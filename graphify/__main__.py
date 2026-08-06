@@ -1133,7 +1133,7 @@ def main() -> None:
             sys.exit(0)
         start = [nid for _, nid in scored[:5]]
         nodes, edges = (_dfs if use_dfs else _bfs)(G, start, depth=2)
-        print(_subgraph_to_text(G, nodes, edges, token_budget=budget))
+        print(_subgraph_to_text(G, nodes, edges, token_budget=budget, terms=terms))
     elif cmd == "benchmark":
         from graphify.benchmark import run_benchmark, print_benchmark
         graph_path = sys.argv[2] if len(sys.argv) > 2 else None
