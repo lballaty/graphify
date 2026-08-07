@@ -107,6 +107,14 @@ _PLATFORM_CONFIG: dict[str, dict] = {
         "skill_dst": Path(".hermes") / "skills" / "graphify" / "SKILL.md",
         "claude_md": False,
     },
+    "agy": {
+        # Google Antigravity (agy) auto-discovers global skills from
+        # ~/.gemini/config/skills/<name>/SKILL.md (per its customization guide),
+        # same folder+SKILL.md+frontmatter shape as Claude, so it reuses skill.md.
+        "skill_file": "skill.md",
+        "skill_dst": Path(".gemini") / "config" / "skills" / "graphify" / "SKILL.md",
+        "claude_md": False,
+    },
 }
 
 
@@ -789,7 +797,7 @@ def main() -> None:
         print("Usage: graphify <command>")
         print()
         print("Commands:")
-        print("  install [--platform P]  copy skill to platform config dir (claude|windows|codex|opencode|aider|claw|droid|trae|trae-cn|hermes|gemini|cursor)")
+        print("  install [--platform P]  copy skill to platform config dir (claude|windows|codex|opencode|aider|claw|droid|trae|trae-cn|hermes|agy|gemini|cursor)")
         print("  discover-profiles [path]  inspect a target repo and propose named graph profiles")
         print("    --write                 save the proposed profiles to .graphifyprofiles.json in the target path")
         print("    --rename old=new        rename a proposed profile before saving it")

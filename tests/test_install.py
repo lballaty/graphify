@@ -14,6 +14,7 @@ PLATFORMS = {
     "trae-cn": (".trae-cn/skills/graphify/SKILL.md",),
     "windows": (".claude/skills/graphify/SKILL.md",),
     "hermes": (".hermes/skills/graphify/SKILL.md",),
+    "agy": (".gemini/config/skills/graphify/SKILL.md",),
 }
 
 
@@ -66,6 +67,11 @@ def test_install_windows(tmp_path):
 def test_install_hermes(tmp_path):
     _install(tmp_path, "hermes")
     assert (tmp_path / ".hermes" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_install_agy(tmp_path):
+    _install(tmp_path, "agy")
+    assert (tmp_path / ".gemini" / "config" / "skills" / "graphify" / "SKILL.md").exists()
 
 
 def test_install_unknown_platform_exits(tmp_path):
