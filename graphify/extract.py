@@ -2399,26 +2399,29 @@ def extract_objc(path: Path) -> dict:
     for caller_nid, body_node in method_bodies:
         def walk_calls(n) -> None:
             if n.type == "message_expression":
-                # [receiver selector]
-                for child in n.children:
-                    if child.type in ("selector", "keyword_argument_list"):
-                        sel = []
-                        if child.type == "selector":
-                            sel.append(_read(child))
-                        else:
-                            for sub in child.children:
-                                if sub.type == "keyword_argument":
-                                    for s in sub.children:
-                                        if s.type == "selector":
-                                            sel.append(_read(s))
-                        method_name = "".join(sel)
-                        for candidate in all_method_nids:
-                            if candidate.endswith(_make_id("", method_name).lstrip("_")):
-                                pair = (caller_nid, candidate)
-                                if pair not in seen_calls and caller_nid != candidate:
-                                    seen_calls.add(pair)
-                                    add_edge(caller_nid, candidate, "calls", body_node.start_point[0] + 1,
-                                             confidence="EXTRACTED", weight=1.0)
+                # [receiver selector] — the selector keyword identifiers are the
+                # `method`-field children; join them the same way method
+                # definitions are named (see the method_definition pass above) so
+                # the two agree (e.g. `[obj setName:x age:y]` -> "setNameage").
+                method_children = n.children_by_field_name("method")
+                method_name = "".join(_read(c) for c in method_children)
+                suffix = _make_id("", method_name).lstrip("_")
+                if suffix:
+                    matches = sorted(
+                        c for c in all_method_nids if c.endswith(suffix)
+                    )
+                    if matches:
+                        # Resolve to a single nearest-scope target instead of
+                        # emitting an edge to every same-named method; suppress
+                        # on a true tie rather than guessing (see _resolve_callee).
+                        cands = {method_name.lower(): [(c, _scope_prefix(c)) for c in matches]}
+                        target = _resolve_callee(method_name, caller_nid, cands)
+                        if target and target != caller_nid:
+                            pair = (caller_nid, target)
+                            if pair not in seen_calls:
+                                seen_calls.add(pair)
+                                add_edge(caller_nid, target, "calls", body_node.start_point[0] + 1,
+                                         confidence="EXTRACTED", weight=1.0)
             for child in n.children:
                 walk_calls(child)
         walk_calls(body_node)

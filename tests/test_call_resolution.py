@@ -100,3 +100,25 @@ def test_non_python_fixture_still_has_calls_edges():
     go = fixtures / "sample.go"
     calls = _calls(extract([go]))
     assert len(calls) >= 1
+
+
+def test_objc_message_call_resolves_to_nearest_scope(tmp_path):
+    """Objective-C `[self selector]` resolves to the caller's own class, not to a
+    same-named method on another class (previously this path emitted an edge to
+    every same-named candidate)."""
+    import pytest
+    try:
+        import tree_sitter_objc  # noqa: F401
+    except Exception:
+        pytest.skip("tree_sitter_objc not installed")
+    src = (
+        "@interface A:NSObject\n-(void)process;\n-(void)run;\n@end\n"
+        "@implementation A\n-(void)run{[self process];}\n-(void)process{}\n@end\n"
+        "@interface B:NSObject\n-(void)process;\n@end\n"
+        "@implementation B\n-(void)process{}\n@end\n"
+    )
+    f = tmp_path / "amb.m"
+    f.write_text(src)
+    calls = _calls(extract([f]))
+    assert ("amb_a_run", "amb_a_process") in calls        # nearest scope wins
+    assert ("amb_a_run", "amb_b_process") not in calls    # no false cross-class edge
