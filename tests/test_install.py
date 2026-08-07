@@ -13,6 +13,7 @@ PLATFORMS = {
     "trae": (".trae/skills/graphify/SKILL.md",),
     "trae-cn": (".trae-cn/skills/graphify/SKILL.md",),
     "windows": (".claude/skills/graphify/SKILL.md",),
+    "hermes": (".hermes/skills/graphify/SKILL.md",),
 }
 
 
@@ -60,6 +61,11 @@ def test_install_trae_cn(tmp_path):
 def test_install_windows(tmp_path):
     _install(tmp_path, "windows")
     assert (tmp_path / ".claude" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_install_hermes(tmp_path):
+    _install(tmp_path, "hermes")
+    assert (tmp_path / ".hermes" / "skills" / "graphify" / "SKILL.md").exists()
 
 
 def test_install_unknown_platform_exits(tmp_path):

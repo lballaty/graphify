@@ -100,6 +100,13 @@ _PLATFORM_CONFIG: dict[str, dict] = {
         "skill_dst": Path(".claude") / "skills" / "graphify" / "SKILL.md",
         "claude_md": True,
     },
+    "hermes": {
+        # Hermes reads skills from ~/.hermes/skills/<name>/SKILL.md with the same
+        # folder+SKILL.md+frontmatter shape as Claude, so it reuses skill.md.
+        "skill_file": "skill.md",
+        "skill_dst": Path(".hermes") / "skills" / "graphify" / "SKILL.md",
+        "claude_md": False,
+    },
 }
 
 
@@ -782,7 +789,7 @@ def main() -> None:
         print("Usage: graphify <command>")
         print()
         print("Commands:")
-        print("  install [--platform P]  copy skill to platform config dir (claude|windows|codex|opencode|aider|claw|droid|trae|trae-cn|gemini|cursor)")
+        print("  install [--platform P]  copy skill to platform config dir (claude|windows|codex|opencode|aider|claw|droid|trae|trae-cn|hermes|gemini|cursor)")
         print("  discover-profiles [path]  inspect a target repo and propose named graph profiles")
         print("    --write                 save the proposed profiles to .graphifyprofiles.json in the target path")
         print("    --rename old=new        rename a proposed profile before saving it")
